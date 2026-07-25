@@ -571,6 +571,63 @@ def sync_from_outlook():
     return {"inserted": inserted, "skipped": skipped,
             "message": f"Imported {inserted} new quote(s), {skipped} duplicate(s) skipped"}
 
+# ── Sync debug endpoint ───────────────────────────────────────────────────────
+@app.get("/api/sync-debug")
+def sync_debug():
+    """Diagnose Graph API connectivity and RMAX Quotes folder lookup."""
+    if not GRAPH_CLIENT_SECRET:
+        return {"error": "GRAPH_CLIENT_SECRET not set in Railway environment variables"}
+    try:
+        import requests as _req
+    except ImportError:
+        return {"error": "requests package not installed"}
+    try:
+        token = _get_graph_token()
+    except Exception as e:
+        return {"error": f"Auth failed: {e}"}
+
+    hdrs = {"Authorization": f"Bearer {token}"}
+    result = {"auth": "ok", "folders": [], "rmax_quotes_folder_id": None, "message_count": None}
+
+    # List all top-level folders
+    try:
+        r = _req.get(f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders?$select=id,displayName&$top=100", headers=hdrs, timeout=20)
+        if r.status_code == 200:
+            folders = r.json().get("value", [])
+            result["folders"] = [f["displayName"] for f in folders]
+            for f in folders:
+                if (f.get("displayName") or "").strip().lower() == "rmax quotes":
+                    result["rmax_quotes_folder_id"] = f["id"]
+    except Exception as e:
+        result["folder_list_error"] = str(e)
+
+    # Also check Inbox children
+    if not result["rmax_quotes_folder_id"]:
+        try:
+            r = _req.get(f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/Inbox/childFolders?$select=id,displayName&$top=100", headers=hdrs, timeout=20)
+            if r.status_code == 200:
+                children = r.json().get("value", [])
+                result["inbox_children"] = [f["displayName"] for f in children]
+                for f in children:
+                    if (f.get("displayName") or "").strip().lower() == "rmax quotes":
+                        result["rmax_quotes_folder_id"] = f["id"]
+        except Exception as e:
+            result["inbox_children_error"] = str(e)
+
+    # If found, count messages
+    if result["rmax_quotes_folder_id"]:
+        fid = result["rmax_quotes_folder_id"]
+        try:
+            r = _req.get(f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/{fid}/messages?$select=subject,receivedDateTime&$top=5", headers=hdrs, timeout=20)
+            if r.status_code == 200:
+                msgs = r.json().get("value", [])
+                result["message_count"] = len(msgs)
+                result["sample_subjects"] = [m.get("subject","") for m in msgs[:3]]
+        except Exception as e:
+            result["message_fetch_error"] = str(e)
+
+    return result
+
 # ── Dashboard endpoint ────────────────────────────────────────────────────────
 @app.get("/api/dashboard")
 def dashboard():
