@@ -985,6 +985,39 @@ function SalesTab() {
   );
 }
 
+// ── Texas Region Map ─────────────────────────────────────────────────────────
+// Small SVG of Texas with each territory highlighted.
+// Simplified outline (viewBox 0 0 100 115, roughly proportional to the state).
+function TexasMap({region}) {
+  const uid     = 'txc' + (region||'x').replace(/\s/g,'');
+  const outline = "M26,1 L67,1 L67,26 L99,30 L99,68 L91,77 L77,92 L62,104 L49,111 L33,100 L17,82 L1,67 L1,61 L7,47 L26,26 Z";
+  const hl = {
+    // Central TX: Austin / San Antonio / Waco corridor
+    'Central Texas':   {d:"M22,50 L73,50 L71,88 L52,103 L33,98 L17,81 Z",   fill:"#3b82f6"},
+    // SE TX: Houston / Beaumont / Galveston
+    'Southeast Texas': {d:"M68,40 L99,44 L99,72 L92,79 L77,93 L63,83 Z",    fill:"#f97316"},
+    // The Valley: Rio Grande Valley southern strip
+    'The Valley':      {d:"M17,80 L34,99 L52,110 L49,112 L32,101 L16,82 Z", fill:"#16a34a"},
+  };
+  const h = hl[region];
+  return React.createElement('svg', {
+    viewBox:"0 0 100 115", width:46, height:53,
+    style:{flexShrink:0, filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.35))'}
+  },
+    React.createElement('defs', {},
+      React.createElement('clipPath', {id:uid},
+        React.createElement('path', {d:outline})
+      )
+    ),
+    React.createElement('path', {d:outline, fill:'#c7d2e8', stroke:'#fff', strokeWidth:2.5}),
+    h && React.createElement('path', {
+      d:h.d, fill:h.fill, fillOpacity:0.85,
+      clipPath:`url(#${uid})`
+    }),
+    React.createElement('path', {d:outline, fill:'none', stroke:'#fff', strokeWidth:1.5})
+  );
+}
+
 // ── Customer Directory ────────────────────────────────────────────────────────
 function CustomerDirectory() {
   const [contacts,    setContacts]    = useState([]);
@@ -1374,6 +1407,22 @@ function CustomerDirectory() {
           )
         ),
 
+        // ── Region banner (specific region selected) ──
+        regionFilter !== 'All' && React.createElement('div', {
+          key:'banner',
+          className:'flex items-center gap-4 px-4 py-3 rounded-xl',
+          style:{background:'#1e3a5f'}
+        },
+          React.createElement(TexasMap, {region:regionFilter}),
+          React.createElement('div', {},
+            React.createElement('div', {className:'font-bold text-white text-base'}, regionFilter),
+            React.createElement('div', {
+              className:'text-xs font-medium mt-0.5',
+              style:{color:'#bfdbfe'}
+            }, regionFiltered.length + ' contact' + (regionFiltered.length!==1?'s':''))
+          )
+        ),
+
         // ── Card groups ──
         ...displayGroups.flatMap(({region, byType}) => {
           const typeKeys = Object.keys(byType).sort((a,b) => {
@@ -1387,14 +1436,17 @@ function CustomerDirectory() {
             sections.push(
               React.createElement('div', {
                 key:'region-'+region,
-                className:'flex items-center gap-3 px-4 py-2.5 rounded-xl',
+                className:'flex items-center gap-4 px-4 py-3 rounded-xl',
                 style:{background:'#1e3a5f'}
               },
-                React.createElement('span', {className:'font-bold text-white text-sm'}, '📍 '+region),
-                React.createElement('span', {
-                  className:'text-xs font-medium px-2 py-0.5 rounded-full',
-                  style:{background:'rgba(255,255,255,0.2)', color:'#bfdbfe'}
-                }, regionTotal + ' contact' + (regionTotal!==1?'s':''))
+                React.createElement(TexasMap, {region}),
+                React.createElement('div', {},
+                  React.createElement('div', {className:'font-bold text-white text-base'}, region),
+                  React.createElement('div', {
+                    className:'text-xs font-medium mt-0.5',
+                    style:{color:'#bfdbfe'}
+                  }, regionTotal + ' contact' + (regionTotal!==1?'s':''))
+                )
               )
             );
           }
