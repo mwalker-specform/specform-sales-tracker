@@ -408,6 +408,13 @@ def _parse_quote_email(subject: str, body_html: str, content_type: str) -> dict:
     freight  = _field('Estimated Freight')
     lead     = _field('Lead time') or _field('Lead Time')
 
+    # Fallback: derive job name from subject if body label missing
+    if not job and subject:
+        job = _sync_re.sub(
+            r'^(re:|fw:|fwd:|rmax\s+quotes?\s*[-–:]\s*)+',
+            '', subject, flags=_sync_re.IGNORECASE
+        ).strip()
+
     if job:      fields['job_name']    = job
     if customer: fields['customer']    = customer
     if location: fields['location']    = location
@@ -489,28 +496,34 @@ def sync_from_outlook():
             except Exception as e:
                 return {"inserted": 0, "skipped": 0, "message": f"Fetch error: {e}"}
 
-        # ── Insert new quotes ─────────────────────────────────────────────────
-        inserted = skipped = 0
+        # ── Insert / update quotes ────────────────────────────────────────────
+        inserted = updated = skipped = 0
         with get_db() as con:
             for msg in msgs:
-                # "Sent To" = the recipient(s) the quote was sent to
+                # "Sent To" = first recipient (who the quote was sent to)
                 to_recipients = msg.get("toRecipients", [])
                 if to_recipients:
                     first_to = to_recipients[0].get("emailAddress", {})
                     sent_to  = (first_to.get("name") or first_to.get("address") or "").strip()
                 else:
                     sent_to  = ""
+
                 subject       = (msg.get("subject") or "").strip()
                 received_raw  = msg.get("receivedDateTime", "")
                 date_received = received_raw[:10] if received_raw else ""
 
-                # Dedup check
+                # Dedup check — if already exists, fix sent_to if it was wrong
                 exists = con.execute(
-                    "SELECT id FROM quotes WHERE subject=? AND date_received=?",
+                    "SELECT id, sent_to FROM quotes WHERE subject=? AND date_received=?",
                     (subject, date_received)
                 ).fetchone()
                 if exists:
-                    skipped += 1
+                    if sent_to and exists["sent_to"] != sent_to:
+                        con.execute("UPDATE quotes SET sent_to=? WHERE id=?",
+                                    (sent_to, exists["id"]))
+                        updated += 1
+                    else:
+                        skipped += 1
                     continue
 
                 # Parse body for pre-populated fields
@@ -531,8 +544,10 @@ def sync_from_outlook():
                 ))
                 inserted += 1
 
-        msg_text = (f"✓ {inserted} new quote{'' if inserted==1 else 's'} imported"
-                    if inserted else "✓ Already up to date")
+        parts = []
+        if inserted: parts.append(f"{inserted} new quote{'' if inserted==1 else 's'} imported")
+        if updated:  parts.append(f"{updated} updated")
+        msg_text = "✓ " + ", ".join(parts) if parts else "✓ Already up to date"
         return {"inserted": inserted, "skipped": skipped, "message": msg_text}
 
     # ── Fallback: sync_pending.json (legacy path) ─────────────────────────────
