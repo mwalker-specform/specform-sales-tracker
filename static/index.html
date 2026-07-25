@@ -1543,18 +1543,18 @@ function App() {
     setSyncMsg('');
     apiFetch(cfg.syncUrl, {method:'POST'})
       .then(data => {
-        setSyncMsg(data.inserted > 0
+        setSyncMsg(data.message || (data.inserted > 0
           ? `✓ ${data.inserted} new quote${data.inserted===1?'':'s'} imported`
-          : data.skipped > 0 ? '✓ Already up to date' : '✓ No new quotes');
+          : '✓ No new quotes'));
         setRefresh(r => r+1);
       })
-      .catch(() => {
-        setSyncMsg('Refresh failed');
+      .catch(e => {
+        setSyncMsg('Refresh failed: ' + e.message);
         setRefresh(r => r+1);
       })
       .finally(() => {
         setSyncing(false);
-        setTimeout(() => setSyncMsg(''), 4000);
+        setTimeout(() => setSyncMsg(''), 10000);
       });
   }
 
