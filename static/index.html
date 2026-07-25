@@ -606,11 +606,12 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
                       }, '×')
                     )
                   ),
-                  // Row 1: date received + sent to + customer
-                  React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2 mb-2'},
+                  // Row 1: date received + sent to + customer + location
+                  React.createElement('div', {className:'grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 mb-2'},
                     F('Date Received', fmtDate(q.date_received), {bold:true}),
                     F('Sent To',       q.sent_to, {bold:true}),
-                    F('Customer',      q.customer, {bold:true})
+                    F('Customer',      q.customer, {bold:true}),
+                    F('Location',      q.location, {bold:true})
                   ),
                   // Excel-style details table
                   React.createElement('div', {className:'mt-3 rounded border border-gray-300 overflow-x-auto text-xs'},
