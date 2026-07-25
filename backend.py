@@ -627,11 +627,18 @@ def sync_debug():
     if result["rmax_quotes_folder_id"]:
         fid = result["rmax_quotes_folder_id"]
         try:
-            r = _req.get(f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/{fid}/messages?$select=subject,receivedDateTime&$top=5", headers=hdrs, timeout=20)
+            r = _req.get(f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/{fid}/messages?$select=subject,receivedDateTime,from,toRecipients&$top=5", headers=hdrs, timeout=20)
             if r.status_code == 200:
                 msgs = r.json().get("value", [])
                 result["message_count"] = len(msgs)
-                result["sample_subjects"] = [m.get("subject","") for m in msgs[:3]]
+                result["sample_emails"] = [{
+                    "subject":   m.get("subject",""),
+                    "date":      m.get("receivedDateTime","")[:10],
+                    "from":      m.get("from",{}).get("emailAddress",{}).get("name",""),
+                    "from_addr": m.get("from",{}).get("emailAddress",{}).get("address",""),
+                    "to":        [r2.get("emailAddress",{}).get("name","") for r2 in m.get("toRecipients",[])],
+                    "to_addr":   [r2.get("emailAddress",{}).get("address","") for r2 in m.get("toRecipients",[])],
+                } for m in msgs[:3]]
         except Exception as e:
             result["message_fetch_error"] = str(e)
 
