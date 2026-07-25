@@ -1084,7 +1084,11 @@ def init_contacts_db():
             updated_at      TEXT DEFAULT (datetime('now'))
         )""")
         # Add columns to existing tables that predate this change
-        for col, defn in [("manually_edited", "INTEGER DEFAULT 0"), ("customer_type", "TEXT")]:
+        for col, defn in [
+            ("manually_edited", "INTEGER DEFAULT 0"),
+            ("customer_type", "TEXT"),
+            ("region", "TEXT"),
+        ]:
             try:
                 con.execute(f"ALTER TABLE contacts ADD COLUMN {col} {defn}")
             except Exception:
@@ -1098,6 +1102,7 @@ class ContactIn(BaseModel):
     location:      Optional[str] = None
     product_line:  Optional[str] = None
     customer_type: Optional[str] = None
+    region:        Optional[str] = None
     notes:         Optional[str] = None
 
 @app.get("/api/contacts")
@@ -1127,9 +1132,9 @@ def create_contact(c: ContactIn):
     with get_db() as con:
         try:
             cur = con.execute("""
-            INSERT INTO contacts (name,company,phone,email,location,product_line,customer_type,notes)
-            VALUES (?,?,?,?,?,?,?,?)
-            """, (c.name,c.company,c.phone,c.email,c.location,c.product_line,c.customer_type,c.notes))
+            INSERT INTO contacts (name,company,phone,email,location,product_line,customer_type,region,notes)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            """, (c.name,c.company,c.phone,c.email,c.location,c.product_line,c.customer_type,c.region,c.notes))
             return {"id": cur.lastrowid}
         except Exception:
             raise HTTPException(409, "A contact with this email already exists")
@@ -1142,9 +1147,9 @@ def update_contact(contact_id: int, c: ContactIn):
             raise HTTPException(404, "Contact not found")
         con.execute("""
         UPDATE contacts SET name=?,company=?,phone=?,email=?,location=?,product_line=?,
-            customer_type=?,notes=?,manually_edited=1,updated_at=datetime('now')
+            customer_type=?,region=?,notes=?,manually_edited=1,updated_at=datetime('now')
         WHERE id=?
-        """, (c.name,c.company,c.phone,c.email,c.location,c.product_line,c.customer_type,c.notes,contact_id))
+        """, (c.name,c.company,c.phone,c.email,c.location,c.product_line,c.customer_type,c.region,c.notes,contact_id))
         return {"ok": True}
 
 @app.delete("/api/contacts/{contact_id}")

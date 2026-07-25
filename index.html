@@ -10,6 +10,7 @@
 <script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   body { font-family: 'Segoe UI', system-ui, sans-serif; background:#f1f5f9; }
   .status-Won       { background:#dcfce7; color:#166534; }
@@ -59,8 +60,12 @@ const STATUS_COLORS = { Won:'#16a34a', Verbal:'#ca8a04', Lost:'#dc2626', 'Not Aw
 const fmt = n => n == null ? '-' : '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:0,maximumFractionDigits:0});
 const fmtDate = s => {
   if (!s) return '';
-  const [y,m,d] = s.slice(0,10).split('-');
-  return `${m}/${d}/${y}`;
+  // Only reformat ISO YYYY-MM-DD; leave "7/9/2026", "Jul 13, 2026", etc. as-is
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const [y,m,d] = s.slice(0,10).split('-');
+    return `${parseInt(m)}/${parseInt(d)}/${y}`;
+  }
+  return s;
 };
 
 function fireConfetti() {
@@ -251,6 +256,7 @@ function Dashboard() {
   });
   const projData = allMonths.map(m => ({
     ...m,
+    total:  monthMap[m.month] ? (monthMap[m.month].total  || 0) : 0,
     won:    monthMap[m.month] ? (monthMap[m.month].won    || 0) : 0,
     verbal: monthMap[m.month] ? (monthMap[m.month].verbal || 0) : 0,
     isFuture: m.month > currentYM,
@@ -987,11 +993,15 @@ function CustomerDirectory() {
   const [search,      setSearch]      = useState('');
   const [importing,   setImporting]   = useState(false);
   const [importMsg,   setImportMsg]   = useState('');
+  const [scanning,    setScanning]    = useState(false);
   const [editingId,   setEditingId]   = useState(null);
   const [editForm,    setEditForm]    = useState({});
   const [sigFetching, setSigFetching] = useState(null);
   const [adding,      setAdding]      = useState(false);
-  const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',notes:''});
+  const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',region:'',notes:''});
+  const [regionFilter, setRegionFilter] = useState('All');
+  const CUSTOMER_TYPES = ['','Contractor','Distributor','General Contractor','Architect'];
+  const REGIONS = ['','Central Texas','Southeast Texas','The Valley'];
 
   function loadContacts(f, s) {
     setLoading(true);
@@ -1014,6 +1024,22 @@ function CustomerDirectory() {
       })
       .catch(() => setImportMsg('❌ Import failed'))
       .finally(() => { setImporting(false); setTimeout(() => setImportMsg(''), 6000); });
+  }
+
+  function handleScan() {
+    setScanning(true);
+    apiFetch('/api/contacts/scan-outlook-folders', {method:'POST'})
+      .then(data => {
+        if (data.error) { setImportMsg('❌ ' + data.error); return; }
+        const parts = (data.folders||[]).map(f =>
+          f.error ? `${f.folder}: ${f.error}`
+                  : `${f.folder}: ${f.messages_scanned} emails → ${f.created} new, ${f.updated} updated`
+        );
+        setImportMsg(`✓ Scan complete — ${parts.join(' | ')} (${data.total_created} total new contacts)`);
+        loadContacts();
+      })
+      .catch(() => setImportMsg('❌ Scan failed'))
+      .finally(() => { setScanning(false); setTimeout(() => setImportMsg(''), 10000); });
   }
 
   function startEdit(c) { setEditingId(c.id); setEditForm({...c}); }
@@ -1048,56 +1074,207 @@ function CustomerDirectory() {
     apiFetch('/api/contacts', {method:'POST', body:JSON.stringify(newForm)})
       .then(() => {
         setAdding(false);
-        setNewForm({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',notes:''});
+        setNewForm({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',notes:''});
         loadContacts();
       })
       .catch(() => alert('Could not save — check that the email address is unique'));
   }
 
-  const plColor = pl => pl==='RMAX'?'#1d4ed8' : pl==='Hydrotech'?'#16a34a' : '#7c3aed';
+  const plBg   = pl => pl==='RMAX'?'#dbeafe' : pl==='Hydrotech'?'#dcfce7' : '#ede9fe';
+  const plText = pl => pl==='RMAX'?'#1e40af' : pl==='Hydrotech'?'#15803d' : '#6d28d9';
+  const typeColor = t => t==='Contractor'?'#1d4ed8':t==='Distributor'?'#16a34a':t==='General Contractor'?'#7c3aed':t==='Architect'?'#b45309':'#6b7280';
+  const typeBg    = t => t==='Contractor'?'#dbeafe':t==='Distributor'?'#dcfce7':t==='General Contractor'?'#ede9fe':t==='Architect'?'#fef3c7':'#f3f4f6';
+  const TYPE_ORDER = ['Contractor','General Contractor','Distributor','Architect','Unclassified'];
+  const TYPE_ABBR  = {'Contractor':'CTR','Distributor':'DIST','General Contractor':'GC','Architect':'ARCH'};
 
-  const grouped = {};
-  contacts.forEach(c => {
-    const loc = (c.location||'').trim() || '(No Location)';
-    if (!grouped[loc]) grouped[loc] = [];
-    grouped[loc].push(c);
-  });
-  const locKeys = Object.keys(grouped).sort((a,b) =>
-    a==='(No Location)' ? 1 : b==='(No Location)' ? -1 : a.localeCompare(b)
-  );
+  // Region tabs — fixed order
+  const REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
+  const allRegionTabs = ['All', ...REGION_ORDER, '(No Region)'];
 
-  function editRow(label, key, type) {
-    return React.createElement('div', {key},
-      React.createElement('label', {className:'block text-xs text-gray-400 mb-0.5'}, label),
-      type==='select'
-        ? React.createElement('select', {value:editForm[key]||'RMAX', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1 text-sm'},
-            ['RMAX','Hydrotech','Both'].map(v=>React.createElement('option',{key:v,value:v},v))
-          )
-        : type==='textarea'
-        ? React.createElement('textarea', {value:editForm[key]||'', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), rows:2, className:'w-full border rounded px-2 py-1 text-sm resize-none'})
-        : React.createElement('input', {type:'text', value:editForm[key]||'', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1 text-sm'})
+  // Apply region filter
+  const regionFiltered = regionFilter==='All' ? contacts
+    : contacts.filter(c => ((c.region||'').trim()||'(No Region)') === regionFilter);
+
+  // Group: region → type → sorted contacts
+  const groupMap = {};
+  [...regionFiltered].sort((a,b)=>(a.company||'').toLowerCase().localeCompare((b.company||'').toLowerCase()))
+    .forEach(c => {
+      const region = (c.region||'').trim() || '(No Region)';
+      const type   = c.customer_type || 'Unclassified';
+      if (!groupMap[region]) groupMap[region] = {};
+      if (!groupMap[region][type]) groupMap[region][type] = [];
+      groupMap[region][type].push(c);
+    });
+  const displayGroups = [...REGION_ORDER, '(No Region)']
+    .filter(r => groupMap[r])
+    .map(region => ({region, byType: groupMap[region]}));
+
+  // Stats
+  const typeCount = {};
+  contacts.forEach(c => { const t = c.customer_type||'Unclassified'; typeCount[t]=(typeCount[t]||0)+1; });
+
+  // Avatar initials
+  function getInitials(c) {
+    const src = (c.name || c.company || '?').trim();
+    const parts = src.split(/\s+/);
+    return parts.length >= 2
+      ? (parts[0][0] + parts[parts.length-1][0]).toUpperCase()
+      : src.slice(0,2).toUpperCase();
+  }
+
+  // Render a single contact card
+  function renderCard(c) {
+    const initials = getInitials(c);
+    const avBg     = typeColor(c.customer_type||'Unclassified');
+    const typeAbbr = TYPE_ABBR[c.customer_type] || '';
+    return React.createElement('div', {
+      key:c.id,
+      className:'bg-white rounded-2xl border shadow-sm hover:shadow-lg transition-all duration-200 flex flex-col overflow-hidden'
+    },
+      // Card header gradient
+      React.createElement('div', {
+        className:'flex flex-col items-center pt-5 pb-4 px-4 relative',
+        style:{background:'linear-gradient(160deg,#f8fafc 0%,#e8f0fe 100%)'}
+      },
+        // Product badge — top-left
+        React.createElement('div', {className:'absolute top-3 left-3'},
+          React.createElement('span', {
+            className:'text-xs font-bold px-2 py-0.5 rounded-full',
+            style:{background:plBg(c.product_line), color:plText(c.product_line)}
+          }, c.product_line||'—')
+        ),
+        // Lock — top-right
+        c.manually_edited && React.createElement('div', {className:'absolute top-3 right-3'},
+          React.createElement('span',{title:'Manually edited — protected from auto-import overwrites',className:'text-sm'},'🔒')
+        ),
+        // Avatar circle
+        React.createElement('div', {
+          className:'w-16 h-16 rounded-full flex items-center justify-center text-xl font-extrabold mb-2 relative select-none',
+          style:{background:avBg, color:'#fff', boxShadow:'0 2px 10px rgba(0,0,0,0.18)'}
+        },
+          initials,
+          typeAbbr && React.createElement('div', {
+            className:'absolute font-bold rounded-full flex items-center justify-center text-white',
+            style:{background:avBg, fontSize:'8px', minWidth:'22px', height:'16px', border:'2px solid white', padding:'0 3px', bottom:'-4px', right:'-4px'}
+          }, typeAbbr)
+        ),
+        // Name
+        React.createElement('div', {
+          className:'font-bold text-gray-900 text-sm text-center leading-tight mt-1 w-full truncate',
+          title:c.name||''
+        }, c.name || React.createElement('span',{className:'text-gray-400 italic text-xs'},'No name yet')),
+        // Company
+        c.company && React.createElement('div', {
+          className:'text-xs text-gray-500 text-center mt-0.5 w-full truncate font-medium',
+          title:c.company
+        }, c.company)
+      ),
+      // Contact info rows
+      React.createElement('div', {className:'px-4 py-3 flex-1 space-y-2'},
+        c.phone
+          ? React.createElement('div', {className:'flex items-center gap-2 text-xs'},
+              React.createElement('span',{className:'text-gray-400 flex-shrink-0'},'📞'),
+              React.createElement('a',{href:`tel:${c.phone}`,className:'text-gray-700 hover:text-blue-600'},c.phone)
+            )
+          : null,
+        c.email
+          ? React.createElement('div', {className:'flex items-center gap-2 text-xs'},
+              React.createElement('span',{className:'text-gray-400 flex-shrink-0'},'✉'),
+              React.createElement('a',{href:`mailto:${c.email}`,className:'text-blue-600 hover:underline truncate block',title:c.email},c.email)
+            )
+          : null,
+        !c.phone && !c.email && React.createElement('div',{className:'text-xs text-gray-300 italic'},'No contact info yet')
+      ),
+      // Action bar
+      React.createElement('div', {className:'flex items-center justify-end gap-1 px-3 py-2 border-t bg-gray-50'},
+        React.createElement('button',{
+          title:'Fetch from email signature', onClick:()=>c.email&&fetchSig(c.email,c.id),
+          disabled:sigFetching===c.email||!c.email,
+          className:'text-gray-400 hover:text-blue-600 px-2 py-1 rounded-md text-xs border border-transparent hover:border-blue-200 hover:bg-blue-50 transition-colors'
+        }, sigFetching===c.email?'⏳':'✉'),
+        React.createElement('button',{
+          title:'Edit', onClick:()=>startEdit(c),
+          className:'text-gray-400 hover:text-blue-600 px-2 py-1 rounded-md text-xs border border-transparent hover:border-blue-200 hover:bg-blue-50 transition-colors'
+        },'✏️'),
+        React.createElement('button',{
+          title:'Delete', onClick:()=>deleteContact(c.id),
+          className:'text-gray-400 hover:text-red-500 px-2 py-1 rounded-md text-xs border border-transparent hover:border-red-200 hover:bg-red-50 transition-colors'
+        },'🗑')
+      )
     );
   }
 
-  function newRow(label, key, type) {
-    return React.createElement('div', {key},
+  // Shared form field renderer
+  function formField(label, key, form, setForm, type) {
+    const cls = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300';
+    return React.createElement('div', {key: label+key},
       React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, label),
       type==='select'
-        ? React.createElement('select', {value:newForm[key]||'RMAX', onChange:e=>setNewForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1.5 text-sm'},
+        ? React.createElement('select', {value:form[key]||'RMAX', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), className:cls},
             ['RMAX','Hydrotech','Both'].map(v=>React.createElement('option',{key:v,value:v},v))
           )
-        : React.createElement('input', {type:'text', value:newForm[key]||'', placeholder:label, onChange:e=>setNewForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1.5 text-sm'})
+        : type==='ctype'
+        ? React.createElement('select', {value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), className:cls},
+            CUSTOMER_TYPES.map(v=>React.createElement('option',{key:v||'blank',value:v},v||'— Select type —'))
+          )
+        : type==='region'
+        ? React.createElement('select', {value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), className:cls},
+            REGIONS.map(v=>React.createElement('option',{key:v||'blank',value:v},v||'— Select region —'))
+          )
+        : type==='textarea'
+        ? React.createElement('textarea', {value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), rows:3, className:cls+' resize-none'})
+        : React.createElement('input', {type:'text', value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), className:cls})
     );
   }
 
-  return React.createElement('div', {},
+  // Modal renderer (not a component — avoids remount issues)
+  function renderModal(title, form, setForm, onSave, onCancel, extraActions) {
+    return React.createElement('div', {
+      className:'fixed inset-0 z-50 flex items-center justify-center p-4',
+      style:{background:'rgba(0,0,0,0.45)'},
+      onClick: e => { if (e.target===e.currentTarget) onCancel(); }
+    },
+      React.createElement('div', {
+        className:'bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden',
+        style:{maxHeight:'90vh', overflowY:'auto'}
+      },
+        React.createElement('div', {className:'flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10'},
+          React.createElement('h2', {className:'font-semibold text-gray-800 text-lg'}, title),
+          React.createElement('button', {onClick:onCancel, className:'text-gray-400 hover:text-gray-600 text-xl leading-none'}, '✕')
+        ),
+        React.createElement('div', {className:'p-6 grid grid-cols-1 sm:grid-cols-2 gap-4'},
+          formField('Name','name',form,setForm),
+          formField('Company','company',form,setForm),
+          formField('Phone','phone',form,setForm),
+          formField('Email','email',form,setForm),
+          formField('Region','region',form,setForm,'region'),
+          formField('City / Location','location',form,setForm),
+          formField('Product Line','product_line',form,setForm,'select'),
+          formField('Customer Type','customer_type',form,setForm,'ctype'),
+          React.createElement('div', {className:'sm:col-span-2'},
+            formField('Notes','notes',form,setForm,'textarea')
+          )
+        ),
+        React.createElement('div', {className:'flex items-center justify-between px-6 py-4 border-t bg-gray-50'},
+          React.createElement('div', {}, extraActions || null),
+          React.createElement('div', {className:'flex gap-2'},
+            React.createElement('button', {onClick:onCancel, className:'px-4 py-2 rounded-lg text-sm font-medium bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'}, 'Cancel'),
+            React.createElement('button', {onClick:onSave, className:'px-4 py-2 rounded-lg text-sm font-medium text-white', style:{background:'#1d4ed8'}}, 'Save')
+          )
+        )
+      )
+    );
+  }
+
+  return React.createElement('div', {className:'space-y-4'},
+
     // ── Toolbar ──
-    React.createElement('div', {className:'flex flex-wrap gap-3 items-center mb-5'},
+    React.createElement('div', {className:'flex flex-wrap gap-2 items-center'},
       React.createElement('div', {className:'flex gap-1'},
         ['All','RMAX','Hydrotech'].map(f =>
           React.createElement('button', {
             key:f, onClick:()=>setFilter(f),
-            className:'px-3 py-1.5 rounded text-sm font-medium border transition-colors',
+            className:'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
             style: filter===f
               ? {background:f==='RMAX'?'#1d4ed8':f==='Hydrotech'?'#16a34a':'#374151', color:'#fff', borderColor:'transparent'}
               : {background:'#fff', color:'#374151', borderColor:'#d1d5db'}
@@ -1105,119 +1282,163 @@ function CustomerDirectory() {
         )
       ),
       React.createElement('input', {
-        type:'text', value:search, placeholder:'🔍 Search contacts…',
+        type:'text', value:search, placeholder:'🔍 Search name, company, email, location…',
         onChange:e=>setSearch(e.target.value),
-        className:'border rounded px-3 py-1.5 text-sm flex-1 min-w-[180px]'
+        className:'border rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[200px]'
       }),
       React.createElement('button', {
-        onClick:handleImport, disabled:importing,
-        className:'px-3 py-1.5 rounded text-sm font-medium border bg-white hover:bg-gray-50',
+        onClick:handleScan, disabled:scanning||importing,
+        className:'px-3 py-1.5 rounded-lg text-sm font-medium text-white whitespace-nowrap',
+        style:{background: scanning ? '#6b7280' : '#0f766e'},
+        title:'Scan RMAX Quotes & Hydrotech Quotes Outlook folders for contact info in email signatures'
+      }, scanning ? '⏳ Scanning…' : '📧 Scan Outlook'),
+      React.createElement('button', {
+        onClick:handleImport, disabled:importing||scanning,
+        className:'px-3 py-1.5 rounded-lg text-sm font-medium border bg-white hover:bg-gray-50 whitespace-nowrap',
         style:{borderColor:'#d1d5db'}
       }, importing ? '⏳ Importing…' : '⬇ Import from Quotes'),
       React.createElement('button', {
         onClick:()=>setAdding(true),
-        className:'px-3 py-1.5 rounded text-sm font-medium text-white',
+        className:'px-3 py-1.5 rounded-lg text-sm font-medium text-white whitespace-nowrap',
         style:{background:'#1d4ed8'}
-      }, '+ Add Contact')
+      }, '+ Add Contact'),
+      React.createElement('button', {
+        onClick: () => {
+          const rows = contacts.map(c => ({
+            'Name':          c.name          || '',
+            'Company':       c.company       || '',
+            'Customer Type': c.customer_type || '',
+            'Region':        c.region        || '',
+            'Product Line':  c.product_line  || '',
+            'City':          c.location      || '',
+            'Phone':         c.phone         || '',
+            'Email':         c.email         || '',
+            'Notes':         c.notes         || '',
+          }));
+          const ws = XLSX.utils.json_to_sheet(rows);
+          ws['!cols'] = [
+            {wch:22},{wch:28},{wch:22},{wch:18},{wch:14},{wch:18},{wch:16},{wch:32},{wch:40}
+          ];
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, 'Customer Directory');
+          const today = new Date().toISOString().slice(0,10);
+          XLSX.writeFile(wb, `Customer_Directory_${today}.xlsx`);
+        },
+        className:'px-3 py-1.5 rounded-lg text-sm font-medium border bg-white hover:bg-gray-50 whitespace-nowrap',
+        style:{borderColor:'#d1d5db'}
+      }, '⬇ Export to Excel')
     ),
 
     // ── Import message ──
-    importMsg && React.createElement('div', {className:'mb-4 px-4 py-2 bg-green-50 border border-green-200 rounded text-sm text-green-800'}, importMsg),
+    importMsg && React.createElement('div', {className:'px-4 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800'}, importMsg),
 
-    // ── New contact form ──
-    adding && React.createElement('div', {className:'mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl'},
-      React.createElement('div', {className:'font-semibold text-blue-900 mb-3'}, 'New Contact'),
-      React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3'},
-        newRow('Name','name'), newRow('Company','company'), newRow('Phone','phone'),
-        newRow('Email','email'), newRow('Location','location'), newRow('Product Line','product_line','select')
+    // ── Stats chips ──
+    !loading && contacts.length > 0 && React.createElement('div', {className:'flex flex-wrap gap-2 items-center'},
+      React.createElement('div', {className:'bg-white border rounded-xl px-4 py-2 flex items-center gap-2 shadow-sm'},
+        React.createElement('span', {className:'text-xl font-bold text-gray-800'}, contacts.length),
+        React.createElement('span', {className:'text-sm text-gray-500'}, 'contacts')
       ),
-      React.createElement('div', {className:'flex gap-2'},
-        React.createElement('button', {onClick:saveNew, className:'px-4 py-1.5 rounded text-sm font-medium text-white', style:{background:'#1d4ed8'}}, 'Save'),
-        React.createElement('button', {onClick:()=>setAdding(false), className:'px-4 py-1.5 rounded text-sm font-medium bg-white border'}, 'Cancel')
+      ...Object.entries(typeCount).sort((a,b) => b[1]-a[1]).map(([type, count]) =>
+        React.createElement('div', {key:type, className:'bg-white border rounded-xl px-4 py-2 flex items-center gap-2 shadow-sm'},
+          React.createElement('span', {className:'text-lg font-bold', style:{color:typeColor(type)}}, count),
+          React.createElement('span', {className:'text-sm text-gray-500'}, type)
+        )
       )
     ),
 
-    // ── Content ──
+    // ── Loading / empty ──
     loading
       ? React.createElement('div', {className:'text-center py-16 text-gray-400'}, 'Loading contacts…')
-    : contacts.length===0
+    : contacts.length === 0
       ? React.createElement('div', {className:'text-center py-20'},
           React.createElement('div', {className:'text-5xl mb-3'}, '👥'),
           React.createElement('p', {className:'text-gray-500 mb-2'}, 'No contacts yet.'),
-          React.createElement('p', {className:'text-sm text-gray-400'}, 'Click "⬇ Import from Quotes" to pull contacts from existing quotes, or "+ Add Contact" to add manually.')
+          React.createElement('p', {className:'text-sm text-gray-400'}, 'Click "⬇ Import from Quotes" or "+ Add Contact" to get started.')
         )
-    : locKeys.map(loc =>
-        React.createElement('div', {key:loc, className:'mb-8'},
-          React.createElement('div', {className:'flex items-center gap-3 mb-3'},
-            React.createElement('span', {className:'font-semibold text-gray-700'}, '📍 '+loc),
-            React.createElement('div', {className:'flex-1 h-px bg-gray-200'}),
-            React.createElement('span', {className:'text-xs text-gray-400'}, grouped[loc].length+' contact'+(grouped[loc].length!==1?'s':''))
-          ),
-          React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'},
-            grouped[loc].map(c => {
-              const isEditing = editingId===c.id;
-              return React.createElement('div', {
-                key:c.id,
-                className:'bg-white rounded-xl border shadow-sm p-4 '+(isEditing?'ring-2 ring-blue-400':'hover:shadow-md')
-              },
-                // Badge + actions
-                React.createElement('div', {className:'flex items-center justify-between mb-3'},
-                  React.createElement('span', {
-                    className:'text-xs font-semibold px-2 py-0.5 rounded-full text-white',
-                    style:{background:plColor(isEditing?editForm.product_line:c.product_line)}
-                  }, isEditing?(editForm.product_line||'RMAX'):(c.product_line||'—')),
-                  !isEditing && React.createElement('div', {className:'flex gap-1'},
-                    React.createElement('button', {
-                      title:'Fetch contact info from email signature',
-                      onClick:()=>c.email&&fetchSig(c.email,c.id),
-                      disabled:sigFetching===c.email||!c.email,
-                      className:'text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded text-xs border border-transparent hover:border-blue-200'
-                    }, sigFetching===c.email?'⏳':'✉'),
-                    React.createElement('button', {
-                      title:'Edit contact', onClick:()=>startEdit(c),
-                      className:'text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded text-xs border border-transparent hover:border-blue-200'
-                    }, '✏️'),
-                    React.createElement('button', {
-                      title:'Delete contact', onClick:()=>deleteContact(c.id),
-                      className:'text-gray-400 hover:text-red-500 px-1.5 py-0.5 rounded text-xs border border-transparent hover:border-red-200'
-                    }, '🗑')
-                  )
-                ),
-                // Card body
-                isEditing
-                ? React.createElement('div', {},
-                    React.createElement('div', {className:'grid grid-cols-1 gap-2 mb-3'},
-                      editRow('Name','name'), editRow('Company','company'), editRow('Phone','phone'),
-                      editRow('Email','email'), editRow('Location','location'),
-                      editRow('Product Line','product_line','select'), editRow('Notes','notes','textarea')
-                    ),
-                    React.createElement('div', {className:'flex gap-2'},
-                      React.createElement('button', {onClick:saveEdit, className:'flex-1 py-1.5 rounded text-sm font-medium text-white', style:{background:'#1d4ed8'}}, 'Save'),
-                      React.createElement('button', {onClick:cancelEdit, className:'flex-1 py-1.5 rounded text-sm font-medium bg-gray-100 text-gray-700'}, 'Cancel')
-                    )
-                  )
-                : React.createElement('div', {},
-                    React.createElement('div', {className:'font-semibold text-gray-900 text-base mb-0.5 truncate'},
-                      c.name||React.createElement('span',{className:'text-gray-400 italic text-sm'},'No name — click ✏️')
-                    ),
-                    c.company&&React.createElement('div',{className:'text-sm text-gray-600 mb-1 truncate'},c.company),
-                    React.createElement('div', {className:'mt-2 space-y-1.5'},
-                      c.email&&React.createElement('div',{className:'flex items-center gap-2 text-sm'},
-                        React.createElement('span',{className:'text-gray-400 text-xs'},'✉'),
-                        React.createElement('a',{href:`mailto:${c.email}`,className:'text-blue-600 hover:underline truncate'},c.email)
-                      ),
-                      c.phone&&React.createElement('div',{className:'flex items-center gap-2 text-sm'},
-                        React.createElement('span',{className:'text-gray-400 text-xs'},'📞'),
-                        React.createElement('a',{href:`tel:${c.phone}`,className:'text-gray-700 hover:text-blue-600'},c.phone)
-                      ),
-                      c.notes&&React.createElement('div',{className:'text-xs text-gray-400 mt-1.5 italic line-clamp-2'},c.notes)
-                    )
-                  )
-              );
-            })
+    : React.createElement('div', {className:'space-y-5'},
+
+        // ── Region tabs ──
+        React.createElement('div', {
+          className:'flex gap-2 overflow-x-auto pb-1',
+          style:{scrollbarWidth:'thin'}
+        },
+          allRegionTabs.map(r =>
+            React.createElement('button', {
+              key:r,
+              onClick:()=>setRegionFilter(r),
+              className:'px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0 border transition-colors',
+              style: regionFilter===r
+                ? {background:'#1e3a5f', color:'#fff', borderColor:'#1e3a5f'}
+                : {background:'#fff', color:'#374151', borderColor:'#d1d5db'}
+            }, r)
           )
-        )
-      )
+        ),
+
+        // ── Card groups ──
+        ...displayGroups.flatMap(({region, byType}) => {
+          const typeKeys = Object.keys(byType).sort((a,b) => {
+            const ai = TYPE_ORDER.indexOf(a); const bi = TYPE_ORDER.indexOf(b);
+            return (ai===-1?99:ai)-(bi===-1?99:bi);
+          });
+          const sections = [];
+          // Region header — only in "All" view
+          if (regionFilter === 'All') {
+            const regionTotal = typeKeys.reduce((s,t)=>s+byType[t].length,0);
+            sections.push(
+              React.createElement('div', {
+                key:'region-'+region,
+                className:'flex items-center gap-3 px-4 py-2.5 rounded-xl',
+                style:{background:'#1e3a5f'}
+              },
+                React.createElement('span', {className:'font-bold text-white text-sm'}, '📍 '+region),
+                React.createElement('span', {
+                  className:'text-xs font-medium px-2 py-0.5 rounded-full',
+                  style:{background:'rgba(255,255,255,0.2)', color:'#bfdbfe'}
+                }, regionTotal + ' contact' + (regionTotal!==1?'s':''))
+              )
+            );
+          }
+          // Type sections with card grid
+          typeKeys.forEach(type => {
+            sections.push(
+              React.createElement('div', {key:'type-'+region+'-'+type, className:'space-y-2'},
+                React.createElement('div', {className:'flex items-center gap-2 px-1'},
+                  React.createElement('span', {
+                    className:'inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full',
+                    style:{background:typeBg(type), color:typeColor(type)}
+                  }, type, React.createElement('span',{style:{opacity:0.6}},'·'), byType[type].length)
+                ),
+                React.createElement('div', {
+                  className:'grid gap-4',
+                  style:{gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))'}
+                },
+                  ...byType[type].map(c => renderCard(c))
+                )
+              )
+            );
+          });
+          return sections;
+        })
+      ),
+
+    // ── Edit modal ──
+    editingId && renderModal(
+      'Edit Contact',
+      editForm, setEditForm,
+      saveEdit, cancelEdit,
+      editForm.email && React.createElement('button', {
+        onClick: () => fetchSig(editForm.email, editingId),
+        disabled: sigFetching === editForm.email,
+        className:'text-sm text-blue-600 hover:text-blue-800 disabled:opacity-40'
+      }, sigFetching === editForm.email ? '⏳ Fetching…' : '✉ Fetch from email sig')
+    ),
+
+    // ── Add contact modal ──
+    adding && renderModal(
+      'New Contact',
+      newForm, setNewForm,
+      saveNew, () => setAdding(false)
+    )
   );
 }
 
@@ -1268,7 +1489,14 @@ function App() {
             React.createElement('div', {className:'text-base sm:text-lg font-bold tracking-tight leading-none'}, 'SPECFORM Sales Tracker')
           )
         ),
-        null
+        // Customer Directory button — far right of blue header
+        React.createElement('button', {
+          onClick: () => setTab('directory'),
+          className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+          style: tab === 'directory'
+            ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
+            : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
+        }, '👥 Customer Directory')
       )
     ),
 
@@ -1289,11 +1517,6 @@ function App() {
           style: tab==='hydrotech' ? {background:'#16a34a'} : {},
           onClick:()=>setTab('hydrotech')
         }, '💧 Hydrotech Quotes'),
-        React.createElement('button', {
-          className:`tab ${tab==='directory'?'tab-active':'tab-inactive'}`,
-          style: tab==='directory' ? {background:'#7c3aed'} : {},
-          onClick:()=>setTab('directory')
-        }, '👥 Customer Directory'),
         React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           onClick:()=>setTab('sales')
