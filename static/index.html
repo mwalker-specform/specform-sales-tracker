@@ -987,6 +987,7 @@ function CustomerDirectory() {
   const [search,      setSearch]      = useState('');
   const [importing,   setImporting]   = useState(false);
   const [importMsg,   setImportMsg]   = useState('');
+  const [scanning,    setScanning]    = useState(false);
   const [editingId,   setEditingId]   = useState(null);
   const [editForm,    setEditForm]    = useState({});
   const [sigFetching, setSigFetching] = useState(null);
@@ -1014,6 +1015,22 @@ function CustomerDirectory() {
       })
       .catch(() => setImportMsg('❌ Import failed'))
       .finally(() => { setImporting(false); setTimeout(() => setImportMsg(''), 6000); });
+  }
+
+  function handleScan() {
+    setScanning(true);
+    apiFetch('/api/contacts/scan-outlook-folders', {method:'POST'})
+      .then(data => {
+        if (data.error) { setImportMsg('❌ ' + data.error); return; }
+        const parts = (data.folders||[]).map(f =>
+          f.error ? `${f.folder}: ${f.error}`
+                  : `${f.folder}: ${f.messages_scanned} emails → ${f.created} new, ${f.updated} updated`
+        );
+        setImportMsg(`✓ Scan complete — ${parts.join(' | ')} (${data.total_created} total new contacts)`);
+        loadContacts();
+      })
+      .catch(() => setImportMsg('❌ Scan failed'))
+      .finally(() => { setScanning(false); setTimeout(() => setImportMsg(''), 10000); });
   }
 
   function startEdit(c) { setEditingId(c.id); setEditForm({...c}); }
@@ -1110,7 +1127,13 @@ function CustomerDirectory() {
         className:'border rounded px-3 py-1.5 text-sm flex-1 min-w-[180px]'
       }),
       React.createElement('button', {
-        onClick:handleImport, disabled:importing,
+        onClick:handleScan, disabled:scanning||importing,
+        className:'px-3 py-1.5 rounded text-sm font-medium border text-white',
+        style:{background: scanning ? '#6b7280' : '#0f766e', borderColor:'transparent'},
+        title:'Scan RMAX Quotes & Hydrotech Quotes Outlook folders for contact info in email signatures'
+      }, scanning ? '⏳ Scanning…' : '📧 Scan Outlook Folders'),
+      React.createElement('button', {
+        onClick:handleImport, disabled:importing||scanning,
         className:'px-3 py-1.5 rounded text-sm font-medium border bg-white hover:bg-gray-50',
         style:{borderColor:'#d1d5db'}
       }, importing ? '⏳ Importing…' : '⬇ Import from Quotes'),
