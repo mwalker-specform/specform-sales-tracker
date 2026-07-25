@@ -476,7 +476,7 @@ def sync_from_outlook():
         msgs = []
         next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
                     f"/mailFolders/{folder_id}/messages"
-                    f"?$select=from,subject,receivedDateTime,body&$top=50")
+                    f"?$select=from,toRecipients,subject,receivedDateTime,body&$top=50")
         while next_url and len(msgs) < 200:
             try:
                 r = _req.get(next_url, headers=hdrs, timeout=30)
@@ -493,16 +493,21 @@ def sync_from_outlook():
         inserted = skipped = 0
         with get_db() as con:
             for msg in msgs:
-                sender        = msg.get("from", {}).get("emailAddress", {})
-                sent_to       = (sender.get("name") or sender.get("address") or "").strip()
+                # "Sent To" = the recipient(s) the quote was sent to
+                to_recipients = msg.get("toRecipients", [])
+                if to_recipients:
+                    first_to = to_recipients[0].get("emailAddress", {})
+                    sent_to  = (first_to.get("name") or first_to.get("address") or "").strip()
+                else:
+                    sent_to  = ""
                 subject       = (msg.get("subject") or "").strip()
                 received_raw  = msg.get("receivedDateTime", "")
                 date_received = received_raw[:10] if received_raw else ""
 
                 # Dedup check
                 exists = con.execute(
-                    "SELECT id FROM quotes WHERE sent_to=? AND subject=? AND date_received=?",
-                    (sent_to, subject, date_received)
+                    "SELECT id FROM quotes WHERE subject=? AND date_received=?",
+                    (subject, date_received)
                 ).fetchone()
                 if exists:
                     skipped += 1
