@@ -1545,8 +1545,12 @@ function App() {
 
   function openEdit(q, cfg) { setModal(q); setModalCfg(cfg || RMAX_CFG); }
   function closeModal(saved) {
+    const y = window.scrollY;          // capture before modal unmounts / focus shifts
     setModal(null);
     if (saved) setRefresh(r => r+1);
+    // Double-rAF: first frame lets React commit + browser process focus change,
+    // second frame runs after any browser-initiated scroll, then we restore.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
   }
 
   function doRefresh(cfg) {
