@@ -101,6 +101,7 @@ app.add_middleware(
 def startup():
     init_db()
     init_hydrotech_db()
+    init_contacts_db()
 
 # ── Quote endpoints ───────────────────────────────────────────────────────────
 @app.get("/api/quotes")
@@ -965,6 +966,213 @@ def hydrotech_dashboard():
             "by_status": [dict(r) for r in by_status],
             "locations": locations,
         }
+
+# ── Contacts ─────────────────────────────────────────────────────────────────
+
+import re as _re
+
+def _strip_html(html: str) -> str:
+    html = _re.sub(r'<style[^>]*>.*?</style>', '', html, flags=_re.DOTALL|_re.IGNORECASE)
+    html = _re.sub(r'<script[^>]*>.*?</script>', '', html, flags=_re.DOTALL|_re.IGNORECASE)
+    html = _re.sub(r'<br\s*/?>', '\n', html, flags=_re.IGNORECASE)
+    html = _re.sub(r'</?(?:p|div|tr|td|li|h\d)[^>]*>', '\n', html, flags=_re.IGNORECASE)
+    html = _re.sub(r'<[^>]+>', '', html)
+    return (html.replace('&nbsp;', ' ').replace('&amp;', '&')
+                .replace('&lt;', '<').replace('&gt;', '>').replace('&#13;', '').replace('\r', ''))
+
+def _extract_phone(text: str) -> str:
+    m = _re.search(r'(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})', text)
+    return m.group(1).strip() if m else ''
+
+def _extract_sig_text(body_text: str) -> str:
+    """Return the likely email signature block (last few lines before any reply chain)."""
+    sep_patterns = [
+        r'^-{3,}[\s\S]*?original\s+message',
+        r'^on\s+.{10,200}\s+wrote:',
+        r'^from:\s*\S+@',
+        r'^sent\s+from\s+my',
+        r'^_{5,}',
+    ]
+    lines = body_text.split('\n')
+    cutoff = len(lines)
+    for i, line in enumerate(lines):
+        for pat in sep_patterns:
+            if _re.match(pat, line.strip(), _re.IGNORECASE):
+                cutoff = i
+                break
+        if cutoff < len(lines):
+            break
+    non_empty = [l for l in lines[:cutoff] if l.strip()]
+    if len(non_empty) <= 1:
+        return ''
+    return '\n'.join(non_empty[-8:])
+
+def init_contacts_db():
+    with get_db() as con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS contacts (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT,
+            company      TEXT,
+            phone        TEXT,
+            email        TEXT UNIQUE,
+            location     TEXT,
+            product_line TEXT,
+            notes        TEXT,
+            created_at   TEXT DEFAULT (datetime('now')),
+            updated_at   TEXT DEFAULT (datetime('now'))
+        )""")
+
+class ContactIn(BaseModel):
+    name:         Optional[str] = None
+    company:      Optional[str] = None
+    phone:        Optional[str] = None
+    email:        Optional[str] = None
+    location:     Optional[str] = None
+    product_line: Optional[str] = None
+    notes:        Optional[str] = None
+
+@app.get("/api/contacts")
+def list_contacts(
+    product_line: Optional[str] = Query(None),
+    location:     Optional[str] = Query(None),
+    search:       Optional[str] = Query(None),
+):
+    with get_db() as con:
+        sql = "SELECT * FROM contacts WHERE 1=1"
+        params = []
+        if product_line and product_line != 'All':
+            sql += " AND (product_line = ? OR product_line = 'Both')"
+            params.append(product_line)
+        if location and location != 'All':
+            sql += " AND location = ?"
+            params.append(location)
+        if search:
+            sql += " AND (name LIKE ? OR company LIKE ? OR email LIKE ? OR location LIKE ? OR phone LIKE ?)"
+            s = f"%{search}%"
+            params += [s, s, s, s, s]
+        sql += " ORDER BY COALESCE(NULLIF(location,''),'zzz'), COALESCE(NULLIF(name,''),'zzz'), email"
+        return [dict(r) for r in con.execute(sql, params).fetchall()]
+
+@app.post("/api/contacts", status_code=201)
+def create_contact(c: ContactIn):
+    with get_db() as con:
+        try:
+            cur = con.execute("""
+            INSERT INTO contacts (name,company,phone,email,location,product_line,notes)
+            VALUES (?,?,?,?,?,?,?)
+            """, (c.name,c.company,c.phone,c.email,c.location,c.product_line,c.notes))
+            return {"id": cur.lastrowid}
+        except Exception:
+            raise HTTPException(409, "A contact with this email already exists")
+
+@app.put("/api/contacts/{contact_id}")
+def update_contact(contact_id: int, c: ContactIn):
+    with get_db() as con:
+        existing = con.execute("SELECT id FROM contacts WHERE id=?", (contact_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "Contact not found")
+        con.execute("""
+        UPDATE contacts SET name=?,company=?,phone=?,email=?,location=?,product_line=?,
+            notes=?,updated_at=datetime('now')
+        WHERE id=?
+        """, (c.name,c.company,c.phone,c.email,c.location,c.product_line,c.notes,contact_id))
+        return {"ok": True}
+
+@app.delete("/api/contacts/{contact_id}")
+def delete_contact(contact_id: int):
+    with get_db() as con:
+        con.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
+        return {"ok": True}
+
+@app.post("/api/contacts/import-from-quotes")
+def import_contacts_from_quotes():
+    """Scan both quote tables and create contact entries for unique sent_to emails."""
+    from collections import defaultdict
+    with get_db() as con:
+        rmax_rows  = con.execute("SELECT DISTINCT sent_to, customer, location FROM quotes WHERE sent_to IS NOT NULL AND sent_to != ''").fetchall()
+        hydro_rows = con.execute("SELECT DISTINCT sent_to, customer, location FROM hydrotech_quotes WHERE sent_to IS NOT NULL AND sent_to != ''").fetchall()
+
+        contact_map = defaultdict(lambda: {"company": "", "location": "", "sources": set()})
+        for row in rmax_rows:
+            e = (row["sent_to"] or "").strip().lower()
+            if e:
+                contact_map[e]["company"]  = contact_map[e]["company"]  or (row["customer"] or "")
+                contact_map[e]["location"] = contact_map[e]["location"] or (row["location"] or "")
+                contact_map[e]["sources"].add("RMAX")
+        for row in hydro_rows:
+            e = (row["sent_to"] or "").strip().lower()
+            if e:
+                contact_map[e]["company"]  = contact_map[e]["company"]  or (row["customer"] or "")
+                contact_map[e]["location"] = contact_map[e]["location"] or (row["location"] or "")
+                contact_map[e]["sources"].add("Hydrotech")
+
+        inserted = skipped = 0
+        for email, info in contact_map.items():
+            product_line = "Both" if len(info["sources"]) > 1 else list(info["sources"])[0]
+            existing = con.execute("SELECT id, product_line FROM contacts WHERE email=?", (email,)).fetchone()
+            if existing:
+                # Upgrade to Both if now seen in both product lines
+                if product_line == "Both" and existing["product_line"] != "Both":
+                    con.execute("UPDATE contacts SET product_line='Both',updated_at=datetime('now') WHERE email=?", (email,))
+                skipped += 1
+            else:
+                con.execute("""
+                INSERT INTO contacts (email,company,location,product_line)
+                VALUES (?,?,?,?)
+                """, (email, info["company"], info["location"], product_line))
+                inserted += 1
+
+        return {"inserted": inserted, "skipped": skipped, "total": inserted + skipped}
+
+@app.get("/api/contacts/fetch-signature/{email:path}")
+def fetch_contact_signature(email: str):
+    """Search inbox for an email FROM this address and parse their signature for contact info."""
+    if not GRAPH_CLIENT_SECRET:
+        return {"found": False, "reason": "Graph API not configured"}
+    try:
+        import requests as _req
+    except ImportError:
+        return {"found": False, "reason": "requests package not installed"}
+    try:
+        token = _get_graph_token()
+    except Exception as e:
+        return {"found": False, "reason": str(e)}
+
+    url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/messages"
+           f"?$filter=from/emailAddress/address eq '{email}'"
+           f"&$select=body,from,subject&$top=1"
+           f"&$orderby=receivedDateTime desc")
+    try:
+        resp = _req.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=20)
+    except Exception as e:
+        return {"found": False, "reason": f"Network error: {e}"}
+    if resp.status_code == 401:
+        return {"found": False, "reason": "Unauthorized — verify Graph API Mail.Read permission"}
+    if resp.status_code != 200:
+        return {"found": False, "reason": f"Graph API returned {resp.status_code}"}
+
+    msgs = resp.json().get("value", [])
+    if not msgs:
+        return {"found": False, "reason": "No emails found from this address in your inbox"}
+
+    msg = msgs[0]
+    body_html = msg.get("body", {}).get("content", "")
+    content_type = msg.get("body", {}).get("contentType", "text")
+    sender_name  = msg.get("from", {}).get("emailAddress", {}).get("name", "")
+
+    body_text = _strip_html(body_html) if content_type == "html" else body_html
+    body_text = _re.sub(r'\n{3,}', '\n\n', body_text).strip()
+
+    sig_text = _extract_sig_text(body_text)
+    phone    = _extract_phone(sig_text or body_text)
+
+    return {
+        "found": True,
+        "name":           sender_name,
+        "phone":          phone,
+        "signature_text": sig_text,
+    }
 
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

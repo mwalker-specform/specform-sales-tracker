@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SPECFORM Sales Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background:#f1f5f9; }
+  .status-Won       { background:#dcfce7; color:#166534; }
+  .status-Verbal    { background:#fef9c3; color:#854d0e; }
+  .status-Lost      { background:#fee2e2; color:#991b1b; }
+  .status-Duplicate { background:#f3f4f6; color:#6b7280; }
+  .status-Unlikely  { background:#ede9fe; color:#5b21b6; }
+  .status-NotAwarded{ background:#ffedd5; color:#9a3412; }
+  .modal-backdrop   { position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:center;justify-content:center; }
+  .modal            { background:#fff;border-radius:12px;padding:28px;width:min(680px,95vw);max-height:90vh;overflow-y:auto; }
+  input, select, textarea { border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;width:100%;font-size:14px;outline:none; }
+  input:focus, select:focus, textarea:focus { border-color:#2563eb;box-shadow:0 0 0 2px #bfdbfe; }
+  .btn { padding:7px 16px;border-radius:7px;font-size:14px;font-weight:500;cursor:pointer;border:none; }
+  .btn-primary { background:#1d4ed8;color:#fff; }
+  .btn-primary:hover { background:#1e40af; }
+  .btn-ghost { background:#f1f5f9;color:#374151; }
+  .btn-ghost:hover { background:#e2e8f0; }
+  .btn-danger { background:#dc2626;color:#fff; }
+  .btn-danger:hover { background:#b91c1c; }
+  .card { background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.07); }
+  .kpi-card { background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,.07);border-left:4px solid; }
+  tr:hover td { background:#f8fafc; }
+  .tab { padding:8px 18px;border-radius:8px;cursor:pointer;font-weight:500;font-size:14px;white-space:nowrap; }
+  .tab-active { background:#1d4ed8;color:#fff; }
+  .tab-inactive { color:#64748b; }
+  .tab-inactive:hover { background:#e2e8f0; }
+  /* ── Mobile ── */
+  .tabs-scroll { overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none; }
+  .tabs-scroll::-webkit-scrollbar { display:none; }
+  @media (max-width:640px) {
+    .tab { padding:7px 12px;font-size:13px; }
+    .modal { padding:16px; }
+    .kpi-card { padding:12px 14px; }
+    .kpi-card .text-2xl { font-size:1.2rem; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const { useState, useEffect, useCallback, useRef } = React;
+const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ComposedChart, Area, Line, ReferenceLine, LabelList } = Recharts;
+
+const API = '';
+const STATUS_OPTIONS = ['Won','Verbal','Lost','Not Awarded','Unlikely','Duplicate'];
+const STATUS_COLORS = { Won:'#16a34a', Verbal:'#ca8a04', Lost:'#dc2626', 'Not Awarded':'#ea580c', Unlikely:'#7c3aed', Duplicate:'#6b7280' };
+const fmt = n => n == null ? '-' : '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:0,maximumFractionDigits:0});
+const fmtDate = s => {
+  if (!s) return '';
+  const [y,m,d] = s.slice(0,10).split('-');
+  return `${m}/${d}/${y}`;
+};
+
+function fireConfetti() {
+  // Two cannons from the bottom corners
+  const opts = { particleCount:60, spread:70, startVelocity:55, ticks:200,
+                 colors:['#16a34a','#22c55e','#4ade80','#fbbf24','#f59e0b','#ffffff','#bbf7d0'] };
+  confetti({ ...opts, origin:{x:0.1, y:1} });
+  confetti({ ...opts, origin:{x:0.9, y:1} });
+  setTimeout(() => {
+    confetti({ ...opts, particleCount:40, spread:50, startVelocity:40, origin:{x:0.5, y:0.9} });
+  }, 250);
+}
+
+// ── Field config ──────────────────────────────────────────────────────────────
+const FIELDS = [
+  {key:'status',       label:'Status',        type:'select'},
+  {key:'date_received',label:'Date Received', type:'text'},
+  {key:'date_quoted',  label:'Date Quoted',   type:'text'},
+  {key:'sent_to',      label:'Sent To',       type:'text'},
+  {key:'subject',      label:'Subject',       type:'text'},
+  {key:'job_name',     label:'Job Name',      type:'text'},
+  {key:'customer',     label:'Customer',      type:'text'},
+  {key:'location',     label:'Location',      type:'text'},
+  {key:'product',      label:'Product',       type:'textarea'},
+  {key:'price',        label:'Price',         type:'text'},
+  {key:'quantities',   label:'Quantities',    type:'text'},
+  {key:'amount',       label:'Amount ($)',    type:'number'},
+  {key:'close_date',   label:'Close Date',    type:'text'},
+  {key:'est_freight',  label:'Est. Freight',  type:'text'},
+  {key:'lead_time',    label:'Lead Time',     type:'text'},
+  {key:'notes',        label:'Notes',         type:'textarea'},
+];
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function apiFetch(path, opts={}) {
+  const res = await fetch(API + path, { headers:{'Content-Type':'application/json'}, ...opts });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ── Status badge ──────────────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+  if (!status) return React.createElement('span', {className:'text-gray-400 text-xs'}, '—');
+  const cls = 'status-' + status.replace(' ','');
+  return React.createElement('span', {
+    className: `text-xs font-semibold px-2 py-0.5 rounded-full ${cls}`
+  }, status);
+}
+
+// ── API configs ───────────────────────────────────────────────────────────────
+const RMAX_CFG = {
+  quotesBase:    '/api/quotes',
+  exportUrl:     '/api/quotes-export',
+  syncUrl:       '/api/sync',
+  dashboardBase: '/api/dashboard',
+  label:         'RMAX',
+  color:         '#1d4ed8',
+};
+const HYDROTECH_CFG = {
+  quotesBase:    '/api/hydrotech-quotes',
+  exportUrl:     '/api/hydrotech-quotes-export',
+  syncUrl:       '/api/hydrotech-sync',
+  dashboardBase: '/api/hydrotech-dashboard',
+  label:         'Hydrotech',
+  color:         '#16a34a',
+};
+
+// ── Quote Modal ───────────────────────────────────────────────────────────────
+function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
+  const [form, setForm] = useState(quote || {});
+  const [saving, setSaving] = useState(false);
+
+  const set = (k,v) => setForm(f => ({...f,[k]:v}));
+
+  async function save() {
+    setSaving(true);
+    try {
+      const body = {...form, amount: form.amount ? parseFloat(form.amount) : null};
+      const wasWon = quote && quote.status === 'Won';
+      if (form.id) {
+        await apiFetch(`${quotesBase}/${form.id}`, {method:'PUT', body:JSON.stringify(body)});
+      } else {
+        await apiFetch(quotesBase, {method:'POST', body:JSON.stringify(body)});
+      }
+      if (body.status === 'Won' && !wasWon) fireConfetti();
+      onSave();
+    } catch(e) { alert('Save failed: ' + e.message); }
+    setSaving(false);
+  }
+
+  return React.createElement('div', {className:'modal-backdrop', onClick:e=>e.target===e.currentTarget&&onClose()},
+    React.createElement('div', {className:'modal'},
+      React.createElement('div', {className:'flex justify-between items-center mb-5'},
+        React.createElement('h2', {className:'text-lg font-bold text-gray-800'}, form.id ? 'Edit Quote' : 'New Quote'),
+        React.createElement('button', {onClick:onClose, className:'text-gray-400 hover:text-gray-600 text-2xl leading-none'}, '×')
+      ),
+      React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 gap-3'},
+        FIELDS.map(f => {
+          const val = form[f.key] ?? '';
+          let el;
+          if (f.type === 'select') {
+            el = React.createElement('select', {value:val, onChange:e=>set(f.key,e.target.value)},
+              React.createElement('option', {value:''},'— None —'),
+              STATUS_OPTIONS.map(s => React.createElement('option',{key:s,value:s},s))
+            );
+          } else if (f.type === 'textarea') {
+            el = React.createElement('textarea', {value:val, rows:2, onChange:e=>set(f.key,e.target.value)});
+          } else {
+            el = React.createElement('input', {type:f.type==='number'?'number':'text', value:val, onChange:e=>set(f.key,e.target.value)});
+          }
+          const wide = f.type==='textarea' || f.key==='subject' || f.key==='product';
+          return React.createElement('div', {key:f.key, className:wide?'col-span-2':'col-span-1'},
+            React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, f.label),
+            el
+          );
+        })
+      ),
+      React.createElement('div', {className:'flex justify-end gap-2 mt-6'},
+        React.createElement('button', {className:'btn btn-ghost', onClick:onClose}, 'Cancel'),
+        React.createElement('button', {className:'btn btn-primary', onClick:save, disabled:saving},
+          saving ? 'Saving…' : 'Save Quote')
+      )
+    )
+  );
+}
+
+// ── Confirm dialog ────────────────────────────────────────────────────────────
+function Confirm({ message, onYes, onNo }) {
+  return React.createElement('div', {className:'modal-backdrop'},
+    React.createElement('div', {className:'modal', style:{maxWidth:380}},
+      React.createElement('p', {className:'text-gray-700 mb-5'}, message),
+      React.createElement('div', {className:'flex justify-end gap-2'},
+        React.createElement('button', {className:'btn btn-ghost', onClick:onNo}, 'Cancel'),
+        React.createElement('button', {className:'btn btn-danger', onClick:onYes}, 'Delete')
+      )
+    )
+  );
+}
+
+// ── Dashboard view ────────────────────────────────────────────────────────────
+function Dashboard() {
+  const [data, setData]         = useState(null);
+  const [selMonth, setSelMonth] = useState('all');
+  useEffect(() => { apiFetch('/api/dashboard').then(setData).catch(console.error); }, []);
+  if (!data) return React.createElement('div', {className:'p-8 text-gray-400'}, 'Loading…');
+
+  const { totals, by_location, by_month, by_status } = data;
+
+  // Build month lookup and sorted option list
+  const monthMap = {};
+  by_month.forEach(r => { monthMap[r.month] = r; });
+  const monthOptions = [...by_month].reverse(); // most recent first
+
+  // Active stats — either a specific month or all-time totals
+  const active = selMonth !== 'all' && monthMap[selMonth]
+    ? {
+        total_amount:  monthMap[selMonth].total,
+        total_quotes:  monthMap[selMonth].total_quotes,
+        won_amount:    monthMap[selMonth].won,
+        won_count:     monthMap[selMonth].won_count,
+        verbal_amount: monthMap[selMonth].verbal,
+        verbal_count:  monthMap[selMonth].verbal_count,
+        lost_amount:   monthMap[selMonth].lost,
+        lost_count:    monthMap[selMonth].lost_count,
+      }
+    : totals;
+
+  // Human-readable month label e.g. "Jul 2026"
+  const monthLabel = selMonth !== 'all' && selMonth
+    ? new Date(selMonth + '-02').toLocaleDateString('en-US',{month:'long',year:'numeric'})
+    : 'All Time';
+
+  const kpis = [
+    {label:'Total Quoted', value:fmt(active.total_amount),   sub:`${active.total_quotes} quotes`,         color:'#2563eb'},
+    {label:'Won',          value:fmt(active.won_amount),     sub:`${active.won_count} deals`,             color:'#16a34a'},
+    {label:'Verbal',       value:fmt(active.verbal_amount),  sub:`${active.verbal_count} pending`,        color:'#ca8a04'},
+    {label:'Lost',         value:fmt(active.lost_amount||0), sub:`${active.lost_count||0} lost`,          color:'#dc2626'},
+  ];
+
+  // Build a full 12-month rolling grid (past 6 + current + future 5) filled with data
+  const today = new Date();
+  const currentYM = today.toISOString().slice(0,7); // YYYY-MM
+  const allMonths = Array.from({length:12}, (_,i) => {
+    const d = new Date(today.getFullYear(), today.getMonth() - 6 + i, 1);
+    const ym = d.toISOString().slice(0,7);
+    const label = d.toLocaleDateString('en-US',{month:'short',year:'2-digit'});
+    return {month:ym, name:label, won:0, verbal:0};
+  });
+  const projData = allMonths.map(m => ({
+    ...m,
+    won:    monthMap[m.month] ? (monthMap[m.month].won    || 0) : 0,
+    verbal: monthMap[m.month] ? (monthMap[m.month].verbal || 0) : 0,
+    isFuture: m.month > currentYM,
+    isCurrent: m.month === currentYM,
+  }));
+  const totalWon    = projData.reduce((s,r) => s + r.won,    0);
+  const totalVerbal = projData.reduce((s,r) => s + r.verbal, 0);
+  const totalAll    = projData.reduce((s,r) => s + (r.total||0), 0);
+
+  return React.createElement('div', {className:'space-y-6'},
+    // KPI row with month selector
+    React.createElement('div', {className:'space-y-3'},
+      React.createElement('div', {className:'flex items-center justify-between'},
+        React.createElement('span', {className:'text-sm font-semibold text-gray-500 uppercase tracking-wide'},
+          monthLabel
+        ),
+        React.createElement('select', {
+          value: selMonth,
+          onChange: e => setSelMonth(e.target.value),
+          style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
+                 background:'#fff', color:'#374151', cursor:'pointer', width:'140px'},
+        },
+          React.createElement('option', {value:'all'}, 'All Time'),
+          monthOptions.map(m => {
+            const label = new Date(m.month + '-02').toLocaleDateString('en-US',{month:'short',year:'numeric'});
+            return React.createElement('option', {key:m.month, value:m.month}, label);
+          })
+        )
+      ),
+      React.createElement('div', {className:'grid grid-cols-2 md:grid-cols-4 gap-4'},
+        kpis.map(k => React.createElement('div', {key:k.label, className:'kpi-card', style:{borderLeftColor:k.color}},
+          React.createElement('div', {className:'text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1'}, k.label),
+          React.createElement('div', {className:'text-2xl font-bold text-gray-800'}, k.value),
+          React.createElement('div', {className:'text-xs text-gray-400 mt-0.5'}, k.sub)
+        ))
+      )
+    ),
+
+    // 12-Month Rolling Sales Projection (full width)
+    React.createElement('div', {className:'card'},
+      React.createElement('div', {className:'flex items-center justify-between mb-1'},
+        React.createElement('h3', {className:'font-semibold text-gray-700'}, '12-Month Rolling Sales Activity'),
+        React.createElement('div', {className:'flex flex-wrap items-center gap-2 text-xs text-gray-500'},
+          React.createElement('span', {}, React.createElement('strong', {className:'text-blue-600'}, fmt(totalAll)), ' Total Quoted'),
+          React.createElement('span', {}, React.createElement('strong', {className:'text-green-700'}, fmt(totalWon)), ' Won'),
+          React.createElement('span', {}, React.createElement('strong', {className:'text-yellow-600'}, fmt(totalVerbal)), ' Verbal')
+        )
+      ),
+      React.createElement('p', {className:'text-xs text-gray-400 mb-4'}, 'Quote amounts by month received · Won and Verbal highlighted'),
+      React.createElement(ResponsiveContainer, {width:'100%', height:280},
+        React.createElement(ComposedChart, {data:projData, margin:{top:10,right:20,left:10,bottom:5}},
+          React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+          React.createElement(XAxis, {dataKey:'name', tick:{fontSize:11}}),
+          React.createElement(YAxis, {tickFormatter:v=>'$'+Math.round(v/1000)+'k', tick:{fontSize:11}, width:52}),
+          React.createElement(Tooltip, {
+            formatter:(v,n)=>[fmt(v),n],
+            labelFormatter:(label,payload) => {
+              if (!payload || !payload[0]) return label;
+              const d = payload[0].payload;
+              return label + (d.isCurrent ? ' — Current Month' : d.isFuture ? ' — Projected' : ' — Actual');
+            }
+          }),
+          React.createElement(Legend),
+          // "Today" reference line
+          React.createElement(ReferenceLine, {
+            x: new Date(today).toLocaleDateString('en-US',{month:'short',year:'2-digit'}),
+            stroke:'#94a3b8', strokeDasharray:'4 3', strokeWidth:1.5,
+            label:{value:'Today', position:'top', fontSize:10, fill:'#94a3b8'}
+          }),
+          React.createElement(Bar, {
+            dataKey:'total', name:'Total Quoted', fill:'#bfdbfe', radius:[4,4,0,0]
+          }),
+          React.createElement(Line, {
+            dataKey:'won', name:'Won', stroke:'#16a34a',
+            strokeWidth:2.5, dot:{r:4, fill:'#16a34a', strokeWidth:0}, activeDot:{r:6},
+            type:'monotone'
+          }),
+          React.createElement(Line, {
+            dataKey:'verbal', name:'Verbal', stroke:'#ca8a04',
+            strokeWidth:2.5, strokeDasharray:'6 3', dot:{r:4, fill:'#ca8a04', strokeWidth:0}, activeDot:{r:6},
+            type:'monotone'
+          })
+        )
+      )
+    ),
+
+    // Bottom row: location chart + status table
+    React.createElement('div', {className:'grid grid-cols-1 lg:grid-cols-2 gap-6'},
+      // By location
+      React.createElement('div', {className:'card'},
+        React.createElement('h3', {className:'font-semibold text-gray-700 mb-4'}, 'Pipeline by Location'),
+        React.createElement(ResponsiveContainer, {width:'100%', height:260},
+          React.createElement(BarChart, {data:by_location.slice(0,10), layout:'vertical', margin:{top:5,right:10,left:80,bottom:5}},
+            React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+            React.createElement(XAxis, {type:'number', tickFormatter:v=>'$'+Math.round(v/1000)+'k', tick:{fontSize:11}}),
+            React.createElement(YAxis, {type:'category', dataKey:'location', tick:{fontSize:10}, width:80}),
+            React.createElement(Tooltip, {formatter:(v,n)=>[fmt(v),n]}),
+            React.createElement(Legend),
+            React.createElement(Bar, {dataKey:'total',  name:'Total Quoted', fill:'#3b82f6', radius:[0,4,4,0]}),
+            React.createElement(Bar, {dataKey:'won',    name:'Won',          fill:'#16a34a', radius:[0,4,4,0]}),
+            React.createElement(Bar, {dataKey:'verbal', name:'Verbal',       fill:'#ca8a04', radius:[0,4,4,0]})
+          )
+        )
+      ),
+
+      // Status breakdown table
+      React.createElement('div', {className:'card'},
+        React.createElement('h3', {className:'font-semibold text-gray-700 mb-3'}, 'Status Breakdown'),
+        React.createElement('table', {className:'w-full text-sm'},
+          React.createElement('thead', {},
+            React.createElement('tr', {className:'text-left text-xs text-gray-500 uppercase border-b'},
+              React.createElement('th', {className:'pb-2 pr-4'}, 'Status'),
+              React.createElement('th', {className:'pb-2 pr-4 text-right'}, 'Count'),
+              React.createElement('th', {className:'pb-2 text-right'}, 'Amount')
+            )
+          ),
+          React.createElement('tbody', {},
+            by_status.map(r => React.createElement('tr', {key:r.status, className:'border-b border-gray-50'},
+              React.createElement('td', {className:'py-2 pr-4'}, React.createElement(StatusBadge, {status:r.status})),
+              React.createElement('td', {className:'py-2 pr-4 text-right text-gray-600'}, r.count),
+              React.createElement('td', {className:'py-2 text-right font-medium text-gray-700'}, fmt(r.amount))
+            ))
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── Quotes list view ──────────────────────────────────────────────────────────
+// Normalize state abbreviations for grouping/filtering
+const normLoc = s => (s || '(No Location)').replace(/,?\s+([a-zA-Z]{2})$/, (_, st) => ', ' + st.toUpperCase());
+
+function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
+  const { quotesBase, exportUrl, dashboardBase } = cfg;
+  const [quotes, setQuotes]       = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [filters, setFilters]     = useState({status:'All', search:''});
+  const [locations, setLocs]      = useState([]);
+  const [selectedLocs, setSelLocs]= useState(new Set());
+  const [locOpen, setLocOpen]     = useState(false);
+  const [deleting, setDeleting]   = useState(null);
+  const searchRef  = useRef();
+  const locDropRef = useRef();
+
+  // Close location dropdown on outside click
+  useEffect(() => {
+    function onDown(e) { if (locDropRef.current && !locDropRef.current.contains(e.target)) setLocOpen(false); }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
+  function toggleLoc(loc) {
+    setSelLocs(prev => { const n = new Set(prev); n.has(loc) ? n.delete(loc) : n.add(loc); return n; });
+  }
+
+  // silent=true → update quotes in place without showing spinner or losing scroll
+  const load = useCallback(async (silent = false) => {
+    const savedScroll = window.scrollY;
+    if (!silent) setLoading(true);
+    const params = new URLSearchParams();
+    if (filters.status !== 'All') params.set('status', filters.status);
+    if (filters.search)           params.set('search', filters.search);
+    const data = await apiFetch(quotesBase + '?' + params);
+    setQuotes(data);
+    if (!silent) setLoading(false);
+    if (silent) requestAnimationFrame(() => window.scrollTo(0, savedScroll));
+  }, [filters]);
+
+  // Filter changes: full load with spinner
+  useEffect(() => { load(false); }, [load]);
+  // Parent refresh (modal save / sync button): silent in-place update
+  const prevRefresh = useRef(refresh);
+  useEffect(() => {
+    if (prevRefresh.current === refresh) return;
+    prevRefresh.current = refresh;
+    load(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresh]);
+  useEffect(() => {
+    apiFetch(dashboardBase).then(d => setLocs(d.locations)).catch(()=>{});
+  }, []);
+
+  async function doDelete(id) {
+    await apiFetch(`${quotesBase}/${id}`, {method:'DELETE'});
+    setDeleting(null);
+    load();
+  }
+
+  const setFilter = (k,v) => setFilters(f => ({...f,[k]:v}));
+
+  return React.createElement('div', {className:'space-y-4'},
+    // Toolbar
+    React.createElement('div', {className:'flex flex-wrap gap-2 items-center'},
+      React.createElement('input', {
+        ref: searchRef,
+        type:'text', placeholder:'Search quotes…',
+        className:'px-3 py-2 border border-gray-200 rounded-lg text-sm w-56',
+        defaultValue: filters.search,
+        onKeyDown: e => e.key==='Enter' && setFilter('search', e.target.value),
+        onBlur: e => setFilter('search', e.target.value)
+      }),
+      React.createElement('select', {
+        value:filters.status,
+        onChange:e=>setFilter('status',e.target.value),
+        className:'px-3 py-2 border border-gray-200 rounded-lg text-sm'
+      },
+        ['All','Won','Verbal','Lost','Not Awarded','Unlikely','Duplicate'].map(s =>
+          React.createElement('option',{key:s,value:s},s)
+        )
+      ),
+      // Location multi-select dropdown
+      React.createElement('div', {ref:locDropRef, style:{position:'relative'}},
+        React.createElement('button', {
+          className:'px-3 py-2 border border-gray-200 rounded-lg text-sm flex items-center gap-1 bg-white',
+          onClick:()=>setLocOpen(o=>!o)
+        },
+          selectedLocs.size === 0 ? 'All Locations'
+          : selectedLocs.size === 1 ? [...selectedLocs][0]
+          : `${selectedLocs.size} locations`,
+          React.createElement('span', {className:'text-gray-400 ml-1'}, '▾')
+        ),
+        locOpen && React.createElement('div', {
+          className:'absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-30 py-1',
+          style:{minWidth:'220px', maxHeight:'320px', overflowY:'auto'}
+        },
+          // "All" option clears selection
+          React.createElement('label', {className:'flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm gap-0'},
+            React.createElement('input', {
+              type:'checkbox', checked:selectedLocs.size===0,
+              onChange:()=>setSelLocs(new Set()),
+              style:{width:'16px', height:'16px', flexShrink:0, margin:'0 10px 0 0', cursor:'pointer'}
+            }),
+            React.createElement('span', {className:'font-medium'}, 'All Locations')
+          ),
+          React.createElement('hr', {className:'my-1 border-gray-100'}),
+          [...new Set(locations.map(normLoc))].sort().map(loc =>
+            React.createElement('label', {key:loc, className:'flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm gap-0'},
+              React.createElement('input', {
+                type:'checkbox', checked:selectedLocs.has(loc),
+                onChange:()=>toggleLoc(loc),
+                style:{width:'16px', height:'16px', flexShrink:0, margin:'0 10px 0 0', cursor:'pointer'}
+              }),
+              loc
+            )
+          )
+        )
+      ),
+      React.createElement('div', {className:'flex items-center gap-3 ml-auto'},
+        syncMsg && React.createElement('span', {className:'text-sm text-green-600 font-medium'}, syncMsg),
+        React.createElement('span', {className:'text-sm text-gray-400'},
+          (() => {
+            const count = selectedLocs.size === 0 ? quotes.length
+              : quotes.filter(q => selectedLocs.has(normLoc(q.location || '(No Location)'))).length;
+            return `${count} quote${count!==1?'s':''}`;
+          })()
+        ),
+        React.createElement('button', {
+          className:'btn flex items-center gap-2',
+          style:{background:'#16a34a', color:'#fff', border:'none'},
+          onClick: () => { window.location.href = exportUrl; }
+        }, '⬇ Export to Excel'),
+        React.createElement('button', {
+          className:'btn btn-primary flex items-center gap-2',
+          onClick: onRefresh,
+          disabled: syncing
+        }, syncing ? '⟳ Syncing…' : '↻ Refresh Quotes')
+      )
+    ),
+
+    // Cards layout
+    (() => {
+      if (loading) return React.createElement('p', {className:'text-center py-12 text-gray-400'}, 'Loading…');
+      if (quotes.length === 0) return React.createElement('p', {className:'text-center py-12 text-gray-400'}, 'No quotes found.');
+
+
+      // Apply client-side location filter then group
+      const visibleQuotes = selectedLocs.size === 0
+        ? quotes
+        : quotes.filter(q => selectedLocs.has(normLoc(q.location || '(No Location)')));
+
+      const grouped   = {};
+      const locLabels = {};
+      visibleQuotes.forEach(q => {
+        const key = normLoc(q.location || '(No Location)');
+        if (!grouped[key]) { grouped[key] = []; locLabels[key] = key; }
+        grouped[key].push(q);
+      });
+      const sortedLocs = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+
+      const F = (label, value, opts={}) => React.createElement('div', {className: opts.wide ? 'col-span-3' : ''},
+        React.createElement('div', {className:'text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5'}, label),
+        React.createElement('div', {className:`text-sm break-words ${opts.bold ? 'font-bold text-gray-800' : 'text-gray-700'}`}, value || '—')
+      );
+
+      return React.createElement('div', {className:'space-y-5'},
+        sortedLocs.map(loc => {
+          const locQuotes = grouped[loc];
+          const locTotal  = locQuotes.reduce((s, q) => s + (q.amount || 0), 0);
+          return React.createElement('div', {key: loc, className:'rounded-lg overflow-hidden shadow-sm border border-gray-200'},
+            // Location header
+            React.createElement('div', {className:'px-4 py-2 bg-[#1F4E79] flex items-center justify-between'},
+              React.createElement('span', {className:'font-bold text-white text-sm tracking-wide'}, locLabels[loc] || loc),
+              React.createElement('span', {className:'text-xs text-blue-200'},
+                `${locQuotes.length} quote${locQuotes.length!==1?'s':''} · ${fmt(locTotal)}`)
+            ),
+            // Quote cards
+            React.createElement('div', {},
+              locQuotes.map((q, idx) => {
+                const cardBg = q.status==='Won'  ? 'bg-green-100'
+                             : q.status==='Lost' ? 'bg-red-100'
+                             : 'bg-white';
+                const gap = idx > 0 ? 'mt-3' : '';
+                return React.createElement('div', {
+                  key: q.id,
+                  className: `${cardBg} ${gap} border-2 border-gray-500 rounded-lg p-4 cursor-pointer hover:brightness-[.97] transition-all`,
+                  onClick: () => onEdit(q)
+                },
+                  // Card header: status + job name + amount + delete
+                  React.createElement('div', {className:'flex items-start justify-between mb-3'},
+                    React.createElement('div', {className:'flex items-center gap-2 flex-wrap'},
+                      React.createElement(StatusBadge, {status: q.status}),
+                      React.createElement('span', {className:'font-bold text-gray-800'},
+                        React.createElement('span', {className:'font-normal text-gray-500'}, 'Job Name: '),
+                        q.job_name || q.subject || '—'
+                      ),
+                      React.createElement('label', {
+                        className:'flex items-center gap-1 text-xs text-gray-600 font-normal ml-2 cursor-pointer',
+                        onClick: e => e.stopPropagation()
+                      },
+                        React.createElement('input', {
+                          type:'checkbox',
+                          checked: !!q.add_to_salesforce,
+                          onChange: e => {
+                            e.stopPropagation();
+                            apiFetch(`${quotesBase}/${q.id}`, {method:'PUT', body:JSON.stringify({...q, add_to_salesforce: e.target.checked?1:0})}).then(()=>load(true));
+                          }
+                        }),
+                        'Add to Salesforce'
+                      ),
+                      React.createElement('label', {
+                        className:'flex items-center gap-1 text-xs text-gray-600 font-normal cursor-pointer',
+                        onClick: e => e.stopPropagation()
+                      },
+                        React.createElement('input', {
+                          type:'checkbox',
+                          checked: !!q.completed,
+                          onChange: e => {
+                            e.stopPropagation();
+                            apiFetch(`${quotesBase}/${q.id}`, {method:'PUT', body:JSON.stringify({...q, completed: e.target.checked?1:0})}).then(()=>load(true));
+                          }
+                        }),
+                        'Completed'
+                      )
+                    ),
+                    React.createElement('div', {className:'flex items-center gap-3 shrink-0 ml-4'},
+                      React.createElement('span', {className:'font-bold text-gray-700 whitespace-nowrap'}, fmt(q.amount)),
+                      React.createElement('button', {
+                        className:'text-gray-300 hover:text-red-500 text-xl leading-none',
+                        onClick: e => { e.stopPropagation(); setDeleting(q.id); }
+                      }, '×')
+                    )
+                  ),
+                  // Row 1: date received + sent to + customer
+                  React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2 mb-2'},
+                    F('Date Received', fmtDate(q.date_received), {bold:true}),
+                    F('Sent To',       q.sent_to, {bold:true}),
+                    F('Customer',      q.customer, {bold:true})
+                  ),
+                  // Excel-style details table
+                  React.createElement('div', {className:'mt-3 rounded border border-gray-300 overflow-x-auto text-xs'},
+                    // Header row
+                    React.createElement('div', {className:'grid text-white font-bold uppercase tracking-wide', style:{gridTemplateColumns:'2fr 1.2fr 1.4fr 1fr 1fr 1fr', minWidth:'460px'}},
+                      React.createElement('div', {className:'px-2 py-1 bg-[#404040]'}, 'Product'),
+                      React.createElement('div', {className:'px-2 py-1 bg-[#375623] border-l border-white'}, 'Price'),
+                      React.createElement('div', {className:'px-2 py-1 bg-[#7F6000] border-l border-white'}, 'Quantities'),
+                      React.createElement('div', {className:'px-2 py-1 bg-[#843C0C] border-l border-white'}, 'Est. Freight'),
+                      React.createElement('div', {className:'px-2 py-1 bg-[#4B1C75] border-l border-white'}, 'Lead Time'),
+                      React.createElement('div', {className:'px-2 py-1 bg-[#1F4E79] border-l border-white'}, 'Close Date')
+                    ),
+                    // Data row
+                    React.createElement('div', {className:'grid text-gray-800', style:{gridTemplateColumns:'2fr 1.2fr 1.4fr 1fr 1fr 1fr', minWidth:'460px'}},
+                      React.createElement('div', {className:'px-2 py-2 bg-[#EDEDED] leading-snug'}, q.product || '—'),
+                      React.createElement('div', {className:'px-2 py-2 bg-[#E2EFDA] border-l border-gray-200 leading-snug'}, q.price || '—'),
+                      React.createElement('div', {className:'px-2 py-2 bg-[#FFF2CC] border-l border-gray-200 leading-snug'}, q.quantities || '—'),
+                      React.createElement('div', {className:'px-2 py-2 bg-[#FCE4D6] border-l border-gray-200 leading-snug'}, q.est_freight || '—'),
+                      React.createElement('div', {className:'px-2 py-2 bg-[#EAD1FF] border-l border-gray-200 leading-snug'}, q.lead_time || '—'),
+                      React.createElement('div', {className:'px-2 py-2 bg-[#DDEBF7] border-l border-gray-200 leading-snug'}, fmtDate(q.close_date) || '—')
+                    )
+                  ),
+                  // Notes (only if present)
+                  q.notes ? React.createElement('div', {className:'mt-2'},
+                    F('Notes', q.notes)
+                  ) : null
+                );
+              })
+            )
+          );
+        })
+      );
+    })(),
+
+    deleting && React.createElement(Confirm, {
+      message: 'Delete this quote? This cannot be undone.',
+      onYes: () => doDelete(deleting),
+      onNo:  () => setDeleting(null)
+    })
+  );
+}
+
+// ── SPECFORM Overall Sales tab ────────────────────────────────────────────────
+const PRODUCT_COLORS = {
+  'RMAX':                '#1d4ed8',
+  'Hydrotech':           '#16a34a',
+  'LAM':                 '#a16207',
+  'Advanced Glassworks': '#7a9cb8',
+};
+
+function SalesTab() {
+  const [data, setData]                   = useState(null);
+  const [err,  setErr]                    = useState(null);
+  const [selMonthIdx, setSelMonthIdx]     = useState(null);
+  const [refreshing, setRefreshing]       = useState(false);
+  const [repData, setRepData]             = useState(null);
+  const [selRepMonthIdx, setSelRepMonthIdx] = useState(null);
+
+  function loadSales() {
+    setRefreshing(true);
+    setErr(null);
+    apiFetch('/api/sales')
+      .then(d => { setData(d); setRefreshing(false); })
+      .catch(e => { setErr(e.message); setRefreshing(false); });
+    apiFetch('/api/rep-sales')
+      .then(d => setRepData(d))
+      .catch(() => {});
+  }
+
+  useEffect(() => { loadSales(); }, []);
+
+  if (err)  return React.createElement('p', {className:'p-8 text-red-500'}, 'Error: ' + err);
+  if (!data) return React.createElement('p', {className:'p-8 text-gray-400'}, 'Loading…');
+
+  const { months, annual_plan, annual_total, ytd_total, products } = data;
+
+  // KPI cards
+  const ytdPct = annual_total ? Math.round(ytd_total / annual_total * 100) : 0;
+  const kpis = [
+    {label:'Annual Plan',    value:fmt(annual_total),  color:'#1d4ed8'},
+    {label:'YTD Actual',     value:fmt(ytd_total),     color:'#16a34a'},
+    {label:'YTD vs Plan',    value:ytdPct + '%',       color: ytdPct >= 100 ? '#16a34a' : ytdPct >= 75 ? '#ca8a04' : '#dc2626'},
+    {label:'Months Tracked', value:months.length,      color:'#6b7280'},
+  ];
+
+  // Chart data: one entry per month
+  const chartData = months.map(m => ({
+    name: m.month.slice(0,3),
+    ...Object.fromEntries(products.map(p => [p, Math.round(m.mtd_actual[p] || 0)])),
+    Plan: Math.round(m.plan_total || 0),
+    total: Math.round(m.mtd_total || 0),
+  }));
+
+  // YTD cumulative data
+  const ytdData = months.map(m => ({
+    name: m.month.slice(0,3),
+    'YTD Actual': Math.round(m.ytd_total || 0),
+    'Annual Plan Pace': Math.round(annual_total / 12 * (months.indexOf(m) + 1)),
+  }));
+
+  return React.createElement('div', {className:'space-y-6'},
+    // Toolbar
+    React.createElement('div', {className:'flex justify-end'},
+      React.createElement('button', {
+        className:'btn btn-primary flex items-center gap-2',
+        onClick: loadSales,
+        disabled: refreshing,
+      }, refreshing ? '⟳ Refreshing…' : '↻ Refresh Sales')
+    ),
+
+    // Product breakdown table — TOP position
+    React.createElement('div', {className:'card overflow-x-auto'},
+      React.createElement('div', {className:'flex items-center justify-between mb-4'},
+        React.createElement('h3', {className:'font-bold text-gray-800', style:{fontSize:'16px'}},
+          (months[selMonthIdx ?? months.length - 1]?.month || '') + ' — Grow 2026 - SPECFORM Sales Plan'
+        ),
+        React.createElement('select', {
+          value: selMonthIdx ?? months.length - 1,
+          onChange: e => setSelMonthIdx(Number(e.target.value)),
+          style:{fontSize:'12px', padding:'3px 6px', borderRadius:'6px', border:'1px solid #d1d5db', background:'#fff', color:'#374151', cursor:'pointer', width:'100px'},
+        },
+          months.map((m, i) => React.createElement('option', {key:m.month, value:i}, m.month))
+        )
+      ),
+      (() => {
+        const sel = months[selMonthIdx ?? months.length - 1];
+        if (!sel) return null;
+        const colW = Math.floor(72 / products.length) + '%';
+
+        const prodAvg = {};
+        products.forEach(p => {
+          const vals = months.map(m => m.mtd_actual[p] || 0).filter(v => v > 0);
+          prodAvg[p] = vals.length ? Math.round(vals.reduce((s,v) => s+v,0) / vals.length) : 0;
+        });
+
+        const rows = [
+          { label:'2026 Sales Plan - Yearly', bold:true,  vals: p => annual_plan[p]||0 },
+          { label:'MTD 2026 Projected',       bold:true,  bg:'#fef9c3', labelColor:'#854d0e', valColor:'#854d0e', labelWeight:'800', valWeight:'800', thickBorder:true, vals: p => sel.mtd_actual[p]||0 },
+          { label:'MTD - Average Plan',        bold:false, vals: p => sel.mtd_plan[p]||0 },
+          { label:'MTD Goal',                  bold:false, vals: p => (sel.mtd_actual[p]||0)-(sel.mtd_plan[p]||0) },
+          { label:'YTD 2026 Sales',            bold:true,  bg:'#dcfce7', labelColor:'#166534', valColor:'#166534', vals: p => sel.ytd_actual[p]||0 },
+          { label:'YTD Goal',                  bold:false, vals: p => (sel.ytd_actual[p]||0)-(annual_plan[p]||0) },
+          { label:'Average per month',         bold:false, vals: p => prodAvg[p] },
+        ];
+
+        return React.createElement('table', {style:{width:'100%', borderCollapse:'collapse', fontSize:'13px', tableLayout:'fixed'}},
+          React.createElement('colgroup', null,
+            React.createElement('col', {style:{width:'28%'}}),
+            products.map(p => React.createElement('col', {key:p, style:{width:colW}}))
+          ),
+          React.createElement('thead', null,
+            React.createElement('tr', null,
+              React.createElement('th', {style:{
+                background:'#1F4E79', color:'#fff', padding:'10px 16px',
+                textAlign:'left', fontWeight:'600', fontSize:'11px',
+                letterSpacing:'0.06em', textTransform:'uppercase',
+                borderRight:'1px solid rgba(255,255,255,0.25)',
+              }}, 'Metric'),
+              products.map(p => React.createElement('th', {key:p, style:{
+                background: PRODUCT_COLORS[p], color:'#fff', padding:'10px 16px',
+                textAlign:'right', fontWeight:'600', fontSize:'11px',
+                letterSpacing:'0.06em', textTransform:'uppercase',
+                borderRight:'1px solid rgba(255,255,255,0.25)',
+              }}, p))
+            )
+          ),
+          React.createElement('tbody', null,
+            rows.map((row, i) => {
+              const rowBg = row.bg || (i % 2 === 0 ? '#fff' : '#f8fafc');
+              return React.createElement('tr', {key:row.label},
+                React.createElement('td', {style:{
+                  padding:'9px 16px', fontSize:'13px',
+                  borderTop:    row.thickBorder ? '2.5px solid #92400e' : undefined,
+                  borderBottom: row.thickBorder ? '2.5px solid #92400e' : '1px solid #9ca3af',
+                  borderLeft:   row.thickBorder ? '2.5px solid #92400e' : undefined,
+                  borderRight:  row.thickBorder ? '2.5px solid #92400e' : '1px solid #9ca3af',
+                  fontWeight: row.labelWeight || (row.bold ? '600' : '400'),
+                  color: row.labelColor || '#374151', background: rowBg,
+                }}, row.label),
+                products.map((p) => {
+                  const n = Math.round(row.vals(p) || 0);
+                  const neg = n < 0;
+                  const str = '$' + Math.abs(n).toLocaleString('en-US');
+                  const color = row.valColor ? row.valColor : neg ? '#dc2626' : '#374151';
+                  return React.createElement('td', {key:p, style:{
+                    padding:'9px 16px', textAlign:'right', fontSize:'13px',
+                    fontWeight: row.valWeight || (row.bold ? '600' : '400'),
+                    color,
+                    borderTop:    row.thickBorder ? '2.5px solid #92400e' : undefined,
+                    borderBottom: row.thickBorder ? '2.5px solid #92400e' : '1px solid #9ca3af',
+                    borderRight:  row.thickBorder ? '2.5px solid #92400e' : '1px solid #9ca3af',
+                    background: rowBg,
+                  }}, neg ? '('+str+')' : str);
+                })
+              );
+            })
+          )
+        );
+      })()
+    ),
+
+    // KPI row
+    React.createElement('div', {className:'grid grid-cols-2 md:grid-cols-4 gap-4'},
+      kpis.map(k => React.createElement('div', {key:k.label, className:'kpi-card', style:{borderLeftColor:k.color}},
+        React.createElement('div', {className:'text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1'}, k.label),
+        React.createElement('div', {className:'text-2xl font-bold text-gray-800'}, k.value)
+      ))
+    ),
+
+    // One chart per business unit (2-column grid)
+    React.createElement('div', {className:'grid grid-cols-1 lg:grid-cols-2 gap-6'},
+      products.map(p => {
+        const color   = PRODUCT_COLORS[p];
+        const annPlan = annual_plan[p] || 0;
+        const pData   = months.map(m => ({
+          name:    m.month.slice(0,3),
+          Actual:  Math.round(m.mtd_actual[p] || 0),
+          Plan:    Math.round(m.mtd_plan[p]   || 0),
+          YTD:     Math.round(m.ytd_actual[p] || 0),
+        }));
+        const withData = pData.filter(d => d.Actual > 0);
+        const avg = withData.length ? Math.round(withData.reduce((s,d) => s + d.Actual, 0) / withData.length) : 0;
+        const latestYTD = pData.length ? pData[pData.length-1].YTD : 0;
+        const pct = annPlan ? Math.round(latestYTD / annPlan * 100) : 0;
+        return React.createElement('div', {key:p, className:'card'},
+          // Header: name + mini KPIs
+          React.createElement('div', {className:'flex items-center justify-between mb-3'},
+            React.createElement('div', {className:'flex items-center gap-2'},
+              React.createElement('span', {style:{width:'12px',height:'12px',borderRadius:'50%',background:color,display:'inline-block'}}),
+              React.createElement('h3', {className:'font-semibold text-gray-700'}, p)
+            ),
+            React.createElement('div', {className:'flex gap-4 text-xs text-gray-500'},
+              React.createElement('span', {}, 'YTD: ', React.createElement('strong', {className:'text-gray-700'}, fmt(latestYTD))),
+              React.createElement('span', {}, 'Avg/Mo: ', React.createElement('strong', {className:'text-gray-700'}, fmt(avg))),
+              React.createElement('span', {}, 'Plan: ', React.createElement('strong', {className:'text-gray-700'}, fmt(annPlan))),
+              React.createElement('span', {
+                className: 'font-bold ' + (pct >= 100 ? 'text-green-600' : pct >= 75 ? 'text-yellow-600' : 'text-red-500')
+              }, pct + '% of plan')
+            )
+          ),
+          React.createElement(ResponsiveContainer, {width:'100%', height:240},
+            React.createElement(ComposedChart, {data:pData, margin:{top:20,right:12,left:0,bottom:4}},
+              React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+              React.createElement(XAxis, {dataKey:'name', tick:{fontSize:10}}),
+              React.createElement(YAxis, {tickFormatter:v=>'$'+Math.round(v/1000)+'k', tick:{fontSize:10}, width:50}),
+              React.createElement(Tooltip, {formatter:(v,n)=>[fmt(v),n]}),
+              React.createElement(Legend, {iconSize:10, wrapperStyle:{fontSize:'11px'}}),
+              React.createElement(Bar,  {dataKey:'Actual', fill:color, radius:[4,4,0,0], name:'MTD Actual'},
+                React.createElement(LabelList, {
+                  dataKey:'Actual',
+                  position:'top',
+                  style:{fontSize:'10px', fontWeight:'800', fill:'#111827'},
+                  formatter: v => v >= 1000 ? '$' + Math.round(v/1000) + 'k' : v ? '$' + v : ''
+                })
+              ),
+              React.createElement(Line, {dataKey:'Plan', stroke:'#dc2626', strokeWidth:2, strokeDasharray:'4 3', dot:false, name:'MTD Plan'}),
+              avg > 0 && React.createElement(ReferenceLine, {
+                y: avg, stroke:'#6b7280', strokeWidth:1.5, strokeDasharray:'6 3',
+                label:{value:'Avg ' + fmt(avg), position:'insideTopRight', fontSize:10, fill:'#6b7280', fontWeight:600}
+              })
+            )
+          )
+        );
+      })
+    ),
+
+    // Rep Monthly Sales table
+    repData && repData.months.length > 0 && (() => {
+      const REP_COLORS = {
+        'RMAX':                '#1d4ed8',
+        'LAM':                 '#a16207',
+        'American Hydrotech':  '#16a34a',
+        'Advanced Glassworks': '#7a9cb8',
+      };
+      const repProducts = repData.products;
+      const selRep = repData.months[selRepMonthIdx ?? repData.months.length - 1];
+      if (!selRep) return null;
+      const colW = Math.floor(72 / repProducts.length) + '%';
+      const repNames = Object.keys(selRep.reps);
+
+      const rows = [
+        { label:'MTD Projected',      bold:true,  bg:'#dcfce7', labelColor:'#166534', valColor:'#166534', labelWeight:'800', valWeight:'800', thickBorder:true, vals: p => selRep.mtd_projected[p]||0 },
+        ...repNames.map(rep => ({
+          label: rep, bold:true,
+          bg:'#fef9c3', labelColor:'#854d0e', valColor:'#854d0e', labelWeight:'700', valWeight:'700',
+          vals: p => selRep.reps[rep]?.[p] || 0,
+        })),
+      ];
+
+      return React.createElement('div', {className:'card overflow-x-auto'},
+        React.createElement('div', {className:'flex items-center justify-between mb-4'},
+          React.createElement('h3', {className:'font-bold text-gray-800', style:{fontSize:'16px'}},
+            selRep.month + ' — Rep Monthly Sales'
+          ),
+          React.createElement('select', {
+            value: selRepMonthIdx ?? repData.months.length - 1,
+            onChange: e => setSelRepMonthIdx(Number(e.target.value)),
+            style:{fontSize:'12px', padding:'3px 6px', borderRadius:'6px', border:'1px solid #d1d5db', background:'#fff', color:'#374151', cursor:'pointer', width:'80px'},
+          },
+            repData.months.map((m,i) => React.createElement('option', {key:m.month, value:i}, m.month))
+          )
+        ),
+        React.createElement('table', {style:{width:'100%', borderCollapse:'collapse', fontSize:'13px', tableLayout:'fixed'}},
+          React.createElement('colgroup', null,
+            React.createElement('col', {style:{width:'28%'}}),
+            repProducts.map(p => React.createElement('col', {key:p, style:{width:colW}}))
+          ),
+          React.createElement('thead', null,
+            React.createElement('tr', null,
+              React.createElement('th', {style:{
+                background:'#1F4E79', color:'#fff', padding:'10px 16px',
+                textAlign:'left', fontWeight:'600', fontSize:'11px',
+                letterSpacing:'0.06em', textTransform:'uppercase',
+                borderRight:'1px solid rgba(255,255,255,0.25)',
+              }}, 'Rep / Metric'),
+              repProducts.map(p => React.createElement('th', {key:p, style:{
+                background: REP_COLORS[p] || '#1F4E79', color:'#fff', padding:'10px 16px',
+                textAlign:'right', fontWeight:'600', fontSize:'11px',
+                letterSpacing:'0.06em', textTransform:'uppercase',
+                borderRight:'1px solid rgba(255,255,255,0.25)',
+              }}, p))
+            )
+          ),
+          React.createElement('tbody', null,
+            rows.map((row, i) => {
+              const rowBg = row.bg || (i % 2 === 0 ? '#fff' : '#f8fafc');
+              return React.createElement('tr', {key:row.label},
+                React.createElement('td', {style:{
+                  padding:'9px 16px', fontSize:'13px',
+                  borderTop:    row.thickBorder ? '2.5px solid #166534' : '1px solid #9ca3af',
+                  borderBottom: row.thickBorder ? '2.5px solid #166534' : '1px solid #9ca3af',
+                  borderLeft:   row.thickBorder ? '2.5px solid #166534' : undefined,
+                  borderRight:  row.thickBorder ? '2.5px solid #166534' : '1px solid #9ca3af',
+                  fontWeight: row.labelWeight || (row.bold ? '600' : '400'),
+                  color: row.labelColor || '#374151', background: rowBg,
+                }}, row.label),
+                repProducts.map(p => {
+                  const n = Math.round(row.vals(p) || 0);
+                  const neg = n < 0;
+                  const str = '$' + Math.abs(n).toLocaleString('en-US');
+                  const color = row.valColor ? row.valColor : neg ? '#dc2626' : '#374151';
+                  return React.createElement('td', {key:p, style:{
+                    padding:'9px 16px', textAlign:'right', fontSize:'13px',
+                    fontWeight: row.valWeight || (row.bold ? '600' : '400'),
+                    color,
+                    borderTop:    row.thickBorder ? '2.5px solid #166534' : '1px solid #9ca3af',
+                    borderBottom: row.thickBorder ? '2.5px solid #166534' : '1px solid #9ca3af',
+                    borderRight:  row.thickBorder ? '2.5px solid #166534' : '1px solid #9ca3af',
+                    background: rowBg,
+                  }}, neg ? '('+str+')' : str);
+                })
+              );
+            })
+          )
+        )
+      );
+    })()
+  );
+}
+
+// ── Customer Directory ────────────────────────────────────────────────────────
+function CustomerDirectory() {
+  const [contacts,    setContacts]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [filter,      setFilter]      = useState('All');
+  const [search,      setSearch]      = useState('');
+  const [importing,   setImporting]   = useState(false);
+  const [importMsg,   setImportMsg]   = useState('');
+  const [editingId,   setEditingId]   = useState(null);
+  const [editForm,    setEditForm]    = useState({});
+  const [sigFetching, setSigFetching] = useState(null);
+  const [adding,      setAdding]      = useState(false);
+  const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',notes:''});
+
+  function loadContacts(f, s) {
+    setLoading(true);
+    const pf = f !== undefined ? f : filter;
+    const ps = s !== undefined ? s : search;
+    let url = '/api/contacts?a=1';
+    if (pf && pf !== 'All') url += `&product_line=${encodeURIComponent(pf)}`;
+    if (ps) url += `&search=${encodeURIComponent(ps)}`;
+    apiFetch(url).then(data => { setContacts(data); setLoading(false); }).catch(() => setLoading(false));
+  }
+
+  useEffect(() => { loadContacts(); }, [filter, search]);
+
+  function handleImport() {
+    setImporting(true);
+    apiFetch('/api/contacts/import-from-quotes', {method:'POST'})
+      .then(data => {
+        setImportMsg(`✓ ${data.inserted} new contact${data.inserted===1?'':'s'} imported, ${data.skipped} already existed`);
+        loadContacts();
+      })
+      .catch(() => setImportMsg('❌ Import failed'))
+      .finally(() => { setImporting(false); setTimeout(() => setImportMsg(''), 6000); });
+  }
+
+  function startEdit(c) { setEditingId(c.id); setEditForm({...c}); }
+  function cancelEdit() { setEditingId(null); setEditForm({}); }
+  function saveEdit() {
+    apiFetch(`/api/contacts/${editingId}`, {method:'PUT', body:JSON.stringify(editForm)})
+      .then(() => { cancelEdit(); loadContacts(); });
+  }
+  function deleteContact(id) {
+    if (!confirm('Delete this contact?')) return;
+    apiFetch(`/api/contacts/${id}`, {method:'DELETE'}).then(() => loadContacts());
+  }
+  function fetchSig(email, id) {
+    setSigFetching(email);
+    apiFetch(`/api/contacts/fetch-signature/${encodeURIComponent(email)}`)
+      .then(data => {
+        if (data.found) {
+          const c = contacts.find(x => x.id === id) || {};
+          startEdit({...c, id,
+            name:  data.name  || c.name  || '',
+            phone: data.phone || c.phone || '',
+            notes: c.notes || (data.signature_text ? data.signature_text.slice(0,300) : ''),
+          });
+        } else {
+          alert('No signature found: ' + (data.reason || 'unknown'));
+        }
+      })
+      .catch(() => alert('Error fetching signature'))
+      .finally(() => setSigFetching(null));
+  }
+  function saveNew() {
+    apiFetch('/api/contacts', {method:'POST', body:JSON.stringify(newForm)})
+      .then(() => {
+        setAdding(false);
+        setNewForm({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',notes:''});
+        loadContacts();
+      })
+      .catch(() => alert('Could not save — check that the email address is unique'));
+  }
+
+  const plColor = pl => pl==='RMAX'?'#1d4ed8' : pl==='Hydrotech'?'#16a34a' : '#7c3aed';
+
+  const grouped = {};
+  contacts.forEach(c => {
+    const loc = (c.location||'').trim() || '(No Location)';
+    if (!grouped[loc]) grouped[loc] = [];
+    grouped[loc].push(c);
+  });
+  const locKeys = Object.keys(grouped).sort((a,b) =>
+    a==='(No Location)' ? 1 : b==='(No Location)' ? -1 : a.localeCompare(b)
+  );
+
+  function editRow(label, key, type) {
+    return React.createElement('div', {key},
+      React.createElement('label', {className:'block text-xs text-gray-400 mb-0.5'}, label),
+      type==='select'
+        ? React.createElement('select', {value:editForm[key]||'RMAX', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1 text-sm'},
+            ['RMAX','Hydrotech','Both'].map(v=>React.createElement('option',{key:v,value:v},v))
+          )
+        : type==='textarea'
+        ? React.createElement('textarea', {value:editForm[key]||'', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), rows:2, className:'w-full border rounded px-2 py-1 text-sm resize-none'})
+        : React.createElement('input', {type:'text', value:editForm[key]||'', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1 text-sm'})
+    );
+  }
+
+  function newRow(label, key, type) {
+    return React.createElement('div', {key},
+      React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, label),
+      type==='select'
+        ? React.createElement('select', {value:newForm[key]||'RMAX', onChange:e=>setNewForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1.5 text-sm'},
+            ['RMAX','Hydrotech','Both'].map(v=>React.createElement('option',{key:v,value:v},v))
+          )
+        : React.createElement('input', {type:'text', value:newForm[key]||'', placeholder:label, onChange:e=>setNewForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1.5 text-sm'})
+    );
+  }
+
+  return React.createElement('div', {},
+    // ── Toolbar ──
+    React.createElement('div', {className:'flex flex-wrap gap-3 items-center mb-5'},
+      React.createElement('div', {className:'flex gap-1'},
+        ['All','RMAX','Hydrotech'].map(f =>
+          React.createElement('button', {
+            key:f, onClick:()=>setFilter(f),
+            className:'px-3 py-1.5 rounded text-sm font-medium border transition-colors',
+            style: filter===f
+              ? {background:f==='RMAX'?'#1d4ed8':f==='Hydrotech'?'#16a34a':'#374151', color:'#fff', borderColor:'transparent'}
+              : {background:'#fff', color:'#374151', borderColor:'#d1d5db'}
+          }, f)
+        )
+      ),
+      React.createElement('input', {
+        type:'text', value:search, placeholder:'🔍 Search contacts…',
+        onChange:e=>setSearch(e.target.value),
+        className:'border rounded px-3 py-1.5 text-sm flex-1 min-w-[180px]'
+      }),
+      React.createElement('button', {
+        onClick:handleImport, disabled:importing,
+        className:'px-3 py-1.5 rounded text-sm font-medium border bg-white hover:bg-gray-50',
+        style:{borderColor:'#d1d5db'}
+      }, importing ? '⏳ Importing…' : '⬇ Import from Quotes'),
+      React.createElement('button', {
+        onClick:()=>setAdding(true),
+        className:'px-3 py-1.5 rounded text-sm font-medium text-white',
+        style:{background:'#1d4ed8'}
+      }, '+ Add Contact')
+    ),
+
+    // ── Import message ──
+    importMsg && React.createElement('div', {className:'mb-4 px-4 py-2 bg-green-50 border border-green-200 rounded text-sm text-green-800'}, importMsg),
+
+    // ── New contact form ──
+    adding && React.createElement('div', {className:'mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl'},
+      React.createElement('div', {className:'font-semibold text-blue-900 mb-3'}, 'New Contact'),
+      React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3'},
+        newRow('Name','name'), newRow('Company','company'), newRow('Phone','phone'),
+        newRow('Email','email'), newRow('Location','location'), newRow('Product Line','product_line','select')
+      ),
+      React.createElement('div', {className:'flex gap-2'},
+        React.createElement('button', {onClick:saveNew, className:'px-4 py-1.5 rounded text-sm font-medium text-white', style:{background:'#1d4ed8'}}, 'Save'),
+        React.createElement('button', {onClick:()=>setAdding(false), className:'px-4 py-1.5 rounded text-sm font-medium bg-white border'}, 'Cancel')
+      )
+    ),
+
+    // ── Content ──
+    loading
+      ? React.createElement('div', {className:'text-center py-16 text-gray-400'}, 'Loading contacts…')
+    : contacts.length===0
+      ? React.createElement('div', {className:'text-center py-20'},
+          React.createElement('div', {className:'text-5xl mb-3'}, '👥'),
+          React.createElement('p', {className:'text-gray-500 mb-2'}, 'No contacts yet.'),
+          React.createElement('p', {className:'text-sm text-gray-400'}, 'Click "⬇ Import from Quotes" to pull contacts from existing quotes, or "+ Add Contact" to add manually.')
+        )
+    : locKeys.map(loc =>
+        React.createElement('div', {key:loc, className:'mb-8'},
+          React.createElement('div', {className:'flex items-center gap-3 mb-3'},
+            React.createElement('span', {className:'font-semibold text-gray-700'}, '📍 '+loc),
+            React.createElement('div', {className:'flex-1 h-px bg-gray-200'}),
+            React.createElement('span', {className:'text-xs text-gray-400'}, grouped[loc].length+' contact'+(grouped[loc].length!==1?'s':''))
+          ),
+          React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'},
+            grouped[loc].map(c => {
+              const isEditing = editingId===c.id;
+              return React.createElement('div', {
+                key:c.id,
+                className:'bg-white rounded-xl border shadow-sm p-4 '+(isEditing?'ring-2 ring-blue-400':'hover:shadow-md')
+              },
+                // Badge + actions
+                React.createElement('div', {className:'flex items-center justify-between mb-3'},
+                  React.createElement('span', {
+                    className:'text-xs font-semibold px-2 py-0.5 rounded-full text-white',
+                    style:{background:plColor(isEditing?editForm.product_line:c.product_line)}
+                  }, isEditing?(editForm.product_line||'RMAX'):(c.product_line||'—')),
+                  !isEditing && React.createElement('div', {className:'flex gap-1'},
+                    React.createElement('button', {
+                      title:'Fetch contact info from email signature',
+                      onClick:()=>c.email&&fetchSig(c.email,c.id),
+                      disabled:sigFetching===c.email||!c.email,
+                      className:'text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded text-xs border border-transparent hover:border-blue-200'
+                    }, sigFetching===c.email?'⏳':'✉'),
+                    React.createElement('button', {
+                      title:'Edit contact', onClick:()=>startEdit(c),
+                      className:'text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded text-xs border border-transparent hover:border-blue-200'
+                    }, '✏️'),
+                    React.createElement('button', {
+                      title:'Delete contact', onClick:()=>deleteContact(c.id),
+                      className:'text-gray-400 hover:text-red-500 px-1.5 py-0.5 rounded text-xs border border-transparent hover:border-red-200'
+                    }, '🗑')
+                  )
+                ),
+                // Card body
+                isEditing
+                ? React.createElement('div', {},
+                    React.createElement('div', {className:'grid grid-cols-1 gap-2 mb-3'},
+                      editRow('Name','name'), editRow('Company','company'), editRow('Phone','phone'),
+                      editRow('Email','email'), editRow('Location','location'),
+                      editRow('Product Line','product_line','select'), editRow('Notes','notes','textarea')
+                    ),
+                    React.createElement('div', {className:'flex gap-2'},
+                      React.createElement('button', {onClick:saveEdit, className:'flex-1 py-1.5 rounded text-sm font-medium text-white', style:{background:'#1d4ed8'}}, 'Save'),
+                      React.createElement('button', {onClick:cancelEdit, className:'flex-1 py-1.5 rounded text-sm font-medium bg-gray-100 text-gray-700'}, 'Cancel')
+                    )
+                  )
+                : React.createElement('div', {},
+                    React.createElement('div', {className:'font-semibold text-gray-900 text-base mb-0.5 truncate'},
+                      c.name||React.createElement('span',{className:'text-gray-400 italic text-sm'},'No name — click ✏️')
+                    ),
+                    c.company&&React.createElement('div',{className:'text-sm text-gray-600 mb-1 truncate'},c.company),
+                    React.createElement('div', {className:'mt-2 space-y-1.5'},
+                      c.email&&React.createElement('div',{className:'flex items-center gap-2 text-sm'},
+                        React.createElement('span',{className:'text-gray-400 text-xs'},'✉'),
+                        React.createElement('a',{href:`mailto:${c.email}`,className:'text-blue-600 hover:underline truncate'},c.email)
+                      ),
+                      c.phone&&React.createElement('div',{className:'flex items-center gap-2 text-sm'},
+                        React.createElement('span',{className:'text-gray-400 text-xs'},'📞'),
+                        React.createElement('a',{href:`tel:${c.phone}`,className:'text-gray-700 hover:text-blue-600'},c.phone)
+                      ),
+                      c.notes&&React.createElement('div',{className:'text-xs text-gray-400 mt-1.5 italic line-clamp-2'},c.notes)
+                    )
+                  )
+              );
+            })
+          )
+        )
+      )
+  );
+}
+
+// ── App shell ─────────────────────────────────────────────────────────────────
+function App() {
+  const [tab, setTab]         = useState('quotes');
+  const [modal, setModal]     = useState(null);
+  const [modalCfg, setModalCfg] = useState(RMAX_CFG);
+  const [refresh, setRefresh] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
+
+  function openEdit(q, cfg) { setModal(q); setModalCfg(cfg || RMAX_CFG); }
+  function closeModal(saved) {
+    setModal(null);
+    if (saved) setRefresh(r => r+1);
+  }
+
+  function doRefresh(cfg) {
+    setSyncing(true);
+    setSyncMsg('');
+    apiFetch(cfg.syncUrl, {method:'POST'})
+      .then(data => {
+        setSyncMsg(data.inserted > 0
+          ? `✓ ${data.inserted} new quote${data.inserted===1?'':'s'} imported`
+          : data.skipped > 0 ? '✓ Already up to date' : '✓ No new quotes');
+        setRefresh(r => r+1);
+      })
+      .catch(() => {
+        setSyncMsg('Refresh failed');
+        setRefresh(r => r+1);
+      })
+      .finally(() => {
+        setSyncing(false);
+        setTimeout(() => setSyncMsg(''), 4000);
+      });
+  }
+
+  return React.createElement('div', {className:'min-h-screen'},
+    // Header
+    React.createElement('header', {className:'bg-[#1F4E79] text-white shadow'},
+      React.createElement('div', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between'},
+        React.createElement('div', {className:'flex items-center gap-4'},
+          // Specform logo PNG (transparent bg, dark marks → invert to white for dark header)
+          React.createElement('img', {src:'/static/logo.png', alt:'Specform Building Components', style:{height:'32px', flexShrink:0, filter:'brightness(0) invert(1)'}}),
+          // RMAX Quote Tracker label
+          React.createElement('div', {className:'border-l border-blue-400 pl-4 ml-1'},
+            React.createElement('div', {className:'text-base sm:text-lg font-bold tracking-tight leading-none'}, 'SPECFORM Sales Tracker')
+          )
+        ),
+        null
+      )
+    ),
+
+    // Nav tabs
+    React.createElement('div', {className:'bg-white border-b shadow-sm'},
+      React.createElement('div', {className:'tabs-scroll'},
+        React.createElement('div', {className:'max-w-7xl mx-auto px-4 sm:px-6 flex gap-2 py-2'},
+        React.createElement('button', {
+          className:`tab ${tab==='quotes'?'tab-active':'tab-inactive'}`,
+          onClick:()=>setTab('quotes')
+        }, '📋 RMAX Quotes'),
+        React.createElement('button', {
+          className:`tab ${tab==='dashboard'?'tab-active':'tab-inactive'}`,
+          onClick:()=>setTab('dashboard')
+        }, '📊 RMAX Dashboard'),
+        React.createElement('button', {
+          className:`tab ${tab==='hydrotech'?'tab-active':'tab-inactive'}`,
+          style: tab==='hydrotech' ? {background:'#16a34a'} : {},
+          onClick:()=>setTab('hydrotech')
+        }, '💧 Hydrotech Quotes'),
+        React.createElement('button', {
+          className:`tab ${tab==='directory'?'tab-active':'tab-inactive'}`,
+          style: tab==='directory' ? {background:'#7c3aed'} : {},
+          onClick:()=>setTab('directory')
+        }, '👥 Customer Directory'),
+        React.createElement('button', {
+          className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
+          onClick:()=>setTab('sales')
+        }, '📈 SPECFORM Overall Sales')
+      ))
+    ),
+
+    // Content
+    React.createElement('main', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-6'},
+      tab === 'dashboard' ? React.createElement(Dashboard, {key:refresh})
+      : tab === 'sales'      ? React.createElement(SalesTab)
+      : tab === 'directory'  ? React.createElement(CustomerDirectory, {key:'dir'})
+      : tab === 'hydrotech' ? React.createElement(QuoteList, {
+          key: 'hydrotech-' + refresh,
+          refresh,
+          onEdit: q => openEdit(q, HYDROTECH_CFG),
+          onRefresh: () => doRefresh(HYDROTECH_CFG),
+          syncing, syncMsg,
+          cfg: HYDROTECH_CFG,
+        })
+      : React.createElement(QuoteList, {
+          key: 'rmax-' + refresh,
+          refresh,
+          onEdit: q => openEdit(q, RMAX_CFG),
+          onRefresh: () => doRefresh(RMAX_CFG),
+          syncing, syncMsg,
+          cfg: RMAX_CFG,
+        })
+    ),
+
+    // Modal
+    modal !== null && React.createElement(QuoteModal, {
+      quote: Object.keys(modal).length === 0 ? null : modal,
+      onClose: () => closeModal(false),
+      onSave:  () => closeModal(true),
+      quotesBase: modalCfg.quotesBase,
+    })
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
