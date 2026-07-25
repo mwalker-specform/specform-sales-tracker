@@ -1138,6 +1138,12 @@ function CustomerDirectory() {
         style:{borderColor:'#d1d5db'}
       }, importing ? '⏳ Importing…' : '⬇ Import from Quotes'),
       React.createElement('button', {
+        onClick:()=>loadContacts(),
+        className:'px-3 py-1.5 rounded text-sm font-medium border bg-white hover:bg-gray-50',
+        style:{borderColor:'#d1d5db'},
+        title:'Refresh contact list'
+      }, '↻ Refresh'),
+      React.createElement('button', {
         onClick:()=>setAdding(true),
         className:'px-3 py-1.5 rounded text-sm font-medium text-white',
         style:{background:'#1d4ed8'}
