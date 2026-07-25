@@ -553,17 +553,16 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
                   },
                   onClick: () => onEdit(q)
                 },
-                  // ⭐ Win star — top-left corner
+                  // ⭐ Win star — large, behind the "Won" badge
                   isWon && React.createElement('div', {
                     style:{
-                      position:'absolute', top:'-10px', left:'-10px',
-                      fontSize:'26px', lineHeight:1,
-                      filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.25))',
-                      pointerEvents:'none', userSelect:'none'
+                      position:'absolute', top:'-8px', left:'-8px',
+                      fontSize:'90px', lineHeight:1, opacity:0.22,
+                      pointerEvents:'none', userSelect:'none', zIndex:0
                     }
                   }, '⭐'),
                   // Card header: status + job name + amount + delete
-                  React.createElement('div', {className:'flex items-start justify-between mb-3'},
+                  React.createElement('div', {className:'flex items-start justify-between mb-3', style:{position:'relative',zIndex:1}},
                     React.createElement('div', {className:'flex items-center gap-2 flex-wrap'},
                       React.createElement(StatusBadge, {status: q.status}),
                       React.createElement('span', {className:'font-bold text-gray-800'},
