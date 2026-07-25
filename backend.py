@@ -1174,6 +1174,131 @@ def fetch_contact_signature(email: str):
         "signature_text": sig_text,
     }
 
+@app.post("/api/contacts/scan-outlook-folders")
+def scan_outlook_folders(folders: Optional[str] = Query(None)):
+    """
+    Scan one or more Outlook mail folders for email signatures and bulk-populate contacts.
+    folders = comma-separated folder names, defaults to 'RMAX Quotes,Hydrotech Quotes'
+    """
+    if not GRAPH_CLIENT_SECRET:
+        return {"error": "Graph API not configured — add GRAPH_CLIENT_SECRET to Railway env vars"}
+    try:
+        import requests as _req
+    except ImportError:
+        return {"error": "requests package not installed"}
+    try:
+        token = _get_graph_token()
+    except Exception as e:
+        return {"error": str(e)}
+
+    folder_names = [f.strip() for f in (folders or "RMAX Quotes,Hydrotech Quotes").split(",") if f.strip()]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def _find_folder_id(name: str) -> str | None:
+        """Look for a mail folder by display name — top-level and inbox children."""
+        for url in [
+            f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders?$filter=displayName eq '{name}'&$select=id",
+            f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/Inbox/childFolders?$filter=displayName eq '{name}'&$select=id",
+        ]:
+            try:
+                r = _req.get(url, headers=headers, timeout=20)
+                if r.status_code == 200:
+                    vals = r.json().get("value", [])
+                    if vals:
+                        return vals[0]["id"]
+            except Exception:
+                pass
+        return None
+
+    results = []
+    total_created = total_updated = total_skipped = 0
+
+    with get_db() as con:
+        for folder_name in folder_names:
+            folder_id = _find_folder_id(folder_name)
+            if not folder_id:
+                results.append({"folder": folder_name, "error": "Folder not found in mailbox"})
+                continue
+
+            pl = "Hydrotech" if "hydrotech" in folder_name.lower() else "RMAX"
+
+            # Paginate through all messages (up to 1 000)
+            msgs = []
+            next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                        f"/mailFolders/{folder_id}/messages"
+                        f"?$select=from,body,subject&$top=100")
+            while next_url and len(msgs) < 1000:
+                try:
+                    r = _req.get(next_url, headers=headers, timeout=30)
+                    if r.status_code != 200:
+                        break
+                    data = r.json()
+                    msgs.extend(data.get("value", []))
+                    next_url = data.get("@odata.nextLink")
+                except Exception:
+                    break
+
+            created = updated = skipped = 0
+            seen = set()
+
+            for msg in msgs:
+                sender = msg.get("from", {}).get("emailAddress", {})
+                email  = (sender.get("address") or "").strip().lower()
+                name   = (sender.get("name")    or "").strip()
+                if not email or email in seen:
+                    continue
+                seen.add(email)
+
+                body_html    = msg.get("body", {}).get("content", "")
+                content_type = msg.get("body", {}).get("contentType", "text")
+                body_text    = _strip_html(body_html) if content_type == "html" else body_html
+                body_text    = _re.sub(r'\n{3,}', '\n\n', body_text).strip()
+                sig_text     = _extract_sig_text(body_text)
+                phone        = _extract_phone(sig_text or body_text)
+
+                existing = con.execute("SELECT * FROM contacts WHERE email=?", (email,)).fetchone()
+                if existing:
+                    updates = {}
+                    if name  and not existing["name"]:  updates["name"]  = name
+                    if phone and not existing["phone"]: updates["phone"] = phone
+                    # Upgrade product_line to Both if contact now appears in a second line
+                    if existing["product_line"] and existing["product_line"] != pl and existing["product_line"] != "Both":
+                        updates["product_line"] = "Both"
+                    if updates:
+                        set_clause = ", ".join(f"{k}=?" for k in updates)
+                        con.execute(
+                            f"UPDATE contacts SET {set_clause}, updated_at=datetime('now') WHERE email=?",
+                            list(updates.values()) + [email]
+                        )
+                        updated += 1
+                    else:
+                        skipped += 1
+                else:
+                    con.execute(
+                        "INSERT INTO contacts (name,email,phone,product_line) VALUES (?,?,?,?)",
+                        (name, email, phone, pl)
+                    )
+                    created += 1
+
+            total_created += created
+            total_updated += updated
+            total_skipped += skipped
+            results.append({
+                "folder":           folder_name,
+                "messages_scanned": len(msgs),
+                "unique_senders":   len(seen),
+                "created":          created,
+                "updated":          updated,
+                "skipped":          skipped,
+            })
+
+    return {
+        "folders":       results,
+        "total_created": total_created,
+        "total_updated": total_updated,
+        "total_skipped": total_skipped,
+    }
+
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
