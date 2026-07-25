@@ -998,9 +998,10 @@ function CustomerDirectory() {
   const [editForm,    setEditForm]    = useState({});
   const [sigFetching, setSigFetching] = useState(null);
   const [adding,      setAdding]      = useState(false);
-  const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',notes:''});
-  const [cityFilter,  setCityFilter]  = useState('All');
+  const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',region:'',notes:''});
+  const [regionFilter, setRegionFilter] = useState('All');
   const CUSTOMER_TYPES = ['','Contractor','Distributor','General Contractor','Architect'];
+  const REGIONS = ['','Central Texas','Southeast Texas','The Valley'];
 
   function loadContacts(f, s) {
     setLoading(true);
@@ -1086,28 +1087,27 @@ function CustomerDirectory() {
   const TYPE_ORDER = ['Contractor','General Contractor','Distributor','Architect','Unclassified'];
   const TYPE_ABBR  = {'Contractor':'CTR','Distributor':'DIST','General Contractor':'GC','Architect':'ARCH'};
 
-  // City tab list
-  const allCities = ['All', ...Array.from(new Set(
-    contacts.map(c => (c.location||'').trim() || '(No Location)')
-  )).sort((a,b) => a==='(No Location)'?1:b==='(No Location)'?-1:a.localeCompare(b))];
+  // Region tabs — fixed order
+  const REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
+  const allRegionTabs = ['All', ...REGION_ORDER, '(No Region)'];
 
-  // Apply city filter
-  const cityFiltered = cityFilter==='All' ? contacts
-    : contacts.filter(c => ((c.location||'').trim()||'(No Location)') === cityFilter);
+  // Apply region filter
+  const regionFiltered = regionFilter==='All' ? contacts
+    : contacts.filter(c => ((c.region||'').trim()||'(No Region)') === regionFilter);
 
-  // Group: city → type → sorted contacts
+  // Group: region → type → sorted contacts
   const groupMap = {};
-  [...cityFiltered].sort((a,b)=>(a.company||'').toLowerCase().localeCompare((b.company||'').toLowerCase()))
+  [...regionFiltered].sort((a,b)=>(a.company||'').toLowerCase().localeCompare((b.company||'').toLowerCase()))
     .forEach(c => {
-      const city = (c.location||'').trim() || '(No Location)';
-      const type = c.customer_type || 'Unclassified';
-      if (!groupMap[city]) groupMap[city] = {};
-      if (!groupMap[city][type]) groupMap[city][type] = [];
-      groupMap[city][type].push(c);
+      const region = (c.region||'').trim() || '(No Region)';
+      const type   = c.customer_type || 'Unclassified';
+      if (!groupMap[region]) groupMap[region] = {};
+      if (!groupMap[region][type]) groupMap[region][type] = [];
+      groupMap[region][type].push(c);
     });
-  const displayGroups = Object.keys(groupMap)
-    .sort((a,b) => a==='(No Location)'?1:b==='(No Location)'?-1:a.localeCompare(b))
-    .map(city => ({city, byType: groupMap[city]}));
+  const displayGroups = [...REGION_ORDER, '(No Region)']
+    .filter(r => groupMap[r])
+    .map(region => ({region, byType: groupMap[region]}));
 
   // Stats
   const typeCount = {};
@@ -1217,6 +1217,10 @@ function CustomerDirectory() {
         ? React.createElement('select', {value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), className:cls},
             CUSTOMER_TYPES.map(v=>React.createElement('option',{key:v||'blank',value:v},v||'— Select type —'))
           )
+        : type==='region'
+        ? React.createElement('select', {value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), className:cls},
+            REGIONS.map(v=>React.createElement('option',{key:v||'blank',value:v},v||'— Select region —'))
+          )
         : type==='textarea'
         ? React.createElement('textarea', {value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), rows:3, className:cls+' resize-none'})
         : React.createElement('input', {type:'text', value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), className:cls})
@@ -1243,7 +1247,8 @@ function CustomerDirectory() {
           formField('Company','company',form,setForm),
           formField('Phone','phone',form,setForm),
           formField('Email','email',form,setForm),
-          formField('Location','location',form,setForm),
+          formField('Region','region',form,setForm,'region'),
+          formField('City / Location','location',form,setForm),
           formField('Product Line','product_line',form,setForm,'select'),
           formField('Customer Type','customer_type',form,setForm,'ctype'),
           React.createElement('div', {className:'sm:col-span-2'},
@@ -1300,19 +1305,19 @@ function CustomerDirectory() {
       React.createElement('button', {
         onClick: () => {
           const rows = contacts.map(c => ({
-            'Name':          c.name        || '',
-            'Company':       c.company     || '',
+            'Name':          c.name          || '',
+            'Company':       c.company       || '',
             'Customer Type': c.customer_type || '',
+            'Region':        c.region        || '',
             'Product Line':  c.product_line  || '',
-            'City':          c.location    || '',
-            'Phone':         c.phone       || '',
-            'Email':         c.email       || '',
-            'Notes':         c.notes       || '',
+            'City':          c.location      || '',
+            'Phone':         c.phone         || '',
+            'Email':         c.email         || '',
+            'Notes':         c.notes         || '',
           }));
           const ws = XLSX.utils.json_to_sheet(rows);
-          // Column widths
           ws['!cols'] = [
-            {wch:22},{wch:28},{wch:22},{wch:14},{wch:18},{wch:16},{wch:32},{wch:40}
+            {wch:22},{wch:28},{wch:22},{wch:18},{wch:14},{wch:18},{wch:16},{wch:32},{wch:40}
           ];
           const wb = XLSX.utils.book_new();
           XLSX.utils.book_append_sheet(wb, ws, 'Customer Directory');
@@ -1352,51 +1357,51 @@ function CustomerDirectory() {
         )
     : React.createElement('div', {className:'space-y-5'},
 
-        // ── City tabs ──
+        // ── Region tabs ──
         React.createElement('div', {
           className:'flex gap-2 overflow-x-auto pb-1',
           style:{scrollbarWidth:'thin'}
         },
-          allCities.map(city =>
+          allRegionTabs.map(r =>
             React.createElement('button', {
-              key:city,
-              onClick:()=>setCityFilter(city),
+              key:r,
+              onClick:()=>setRegionFilter(r),
               className:'px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0 border transition-colors',
-              style: cityFilter===city
+              style: regionFilter===r
                 ? {background:'#1e3a5f', color:'#fff', borderColor:'#1e3a5f'}
                 : {background:'#fff', color:'#374151', borderColor:'#d1d5db'}
-            }, city)
+            }, r)
           )
         ),
 
         // ── Card groups ──
-        ...displayGroups.flatMap(({city, byType}) => {
+        ...displayGroups.flatMap(({region, byType}) => {
           const typeKeys = Object.keys(byType).sort((a,b) => {
             const ai = TYPE_ORDER.indexOf(a); const bi = TYPE_ORDER.indexOf(b);
             return (ai===-1?99:ai)-(bi===-1?99:bi);
           });
           const sections = [];
-          // City header — only in "All" view
-          if (cityFilter === 'All') {
-            const cityTotal = typeKeys.reduce((s,t)=>s+byType[t].length,0);
+          // Region header — only in "All" view
+          if (regionFilter === 'All') {
+            const regionTotal = typeKeys.reduce((s,t)=>s+byType[t].length,0);
             sections.push(
               React.createElement('div', {
-                key:'city-'+city,
+                key:'region-'+region,
                 className:'flex items-center gap-3 px-4 py-2.5 rounded-xl',
                 style:{background:'#1e3a5f'}
               },
-                React.createElement('span', {className:'font-bold text-white text-sm'}, '📍 '+city),
+                React.createElement('span', {className:'font-bold text-white text-sm'}, '📍 '+region),
                 React.createElement('span', {
                   className:'text-xs font-medium px-2 py-0.5 rounded-full',
                   style:{background:'rgba(255,255,255,0.2)', color:'#bfdbfe'}
-                }, cityTotal + ' contact' + (cityTotal!==1?'s':''))
+                }, regionTotal + ' contact' + (regionTotal!==1?'s':''))
               )
             );
           }
           // Type sections with card grid
           typeKeys.forEach(type => {
             sections.push(
-              React.createElement('div', {key:'type-'+city+'-'+type, className:'space-y-2'},
+              React.createElement('div', {key:'type-'+region+'-'+type, className:'space-y-2'},
                 React.createElement('div', {className:'flex items-center gap-2 px-1'},
                   React.createElement('span', {
                     className:'inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full',
@@ -1514,6 +1519,7 @@ function App() {
         }, '💧 Hydrotech Quotes'),
         React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
+          style:{marginLeft:'auto'},
           onClick:()=>setTab('sales')
         }, '📈 SPECFORM Overall Sales')
       ))
