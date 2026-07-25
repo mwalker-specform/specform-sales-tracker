@@ -89,6 +89,7 @@ const FIELDS = [
   {key:'job_name',     label:'Job Name',      type:'text'},
   {key:'customer',     label:'Customer',      type:'text'},
   {key:'location',     label:'Location',      type:'text'},
+  {key:'region',       label:'Region',        type:'select', options:['Central Texas','Southeast Texas','The Valley']},
   {key:'product',      label:'Product',       type:'textarea'},
   {key:'price',        label:'Price',         type:'text'},
   {key:'quantities',   label:'Quantities',    type:'text'},
@@ -167,9 +168,10 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
           const val = form[f.key] ?? '';
           let el;
           if (f.type === 'select') {
+            const selOpts = f.options || STATUS_OPTIONS;
             el = React.createElement('select', {value:val, onChange:e=>set(f.key,e.target.value)},
               React.createElement('option', {value:''},'— None —'),
-              STATUS_OPTIONS.map(s => React.createElement('option',{key:s,value:s},s))
+              selOpts.map(s => React.createElement('option',{key:s,value:s},s))
             );
           } else if (f.type === 'textarea') {
             el = React.createElement('textarea', {value:val, rows:2, onChange:e=>set(f.key,e.target.value)});
@@ -392,26 +394,13 @@ const normLoc = s => (s || '(No Location)').replace(/,?\s+([a-zA-Z]{2})$/, (_, s
 
 function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
   const { quotesBase, exportUrl, dashboardBase } = cfg;
-  const [quotes, setQuotes]       = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [filters, setFilters]     = useState({status:'All', search:''});
-  const [locations, setLocs]      = useState([]);
-  const [selectedLocs, setSelLocs]= useState(new Set());
-  const [locOpen, setLocOpen]     = useState(false);
-  const [deleting, setDeleting]   = useState(null);
-  const searchRef  = useRef();
-  const locDropRef = useRef();
-
-  // Close location dropdown on outside click
-  useEffect(() => {
-    function onDown(e) { if (locDropRef.current && !locDropRef.current.contains(e.target)) setLocOpen(false); }
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, []);
-
-  function toggleLoc(loc) {
-    setSelLocs(prev => { const n = new Set(prev); n.has(loc) ? n.delete(loc) : n.add(loc); return n; });
-  }
+  const [quotes, setQuotes]             = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [filters, setFilters]           = useState({status:'All', search:''});
+  const [regionFilter, setRegionFilter] = useState('All');
+  const [deleting, setDeleting]         = useState(null);
+  const searchRef = useRef();
+  const QUOTE_REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
 
   // silent=true → update quotes in place without showing spinner or losing scroll
   const load = useCallback(async (silent = false) => {
@@ -436,9 +425,6 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
     load(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh]);
-  useEffect(() => {
-    apiFetch(dashboardBase).then(d => setLocs(d.locations)).catch(()=>{});
-  }, []);
 
   async function doDelete(id) {
     await apiFetch(`${quotesBase}/${id}`, {method:'DELETE'});
@@ -449,7 +435,7 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
   const setFilter = (k,v) => setFilters(f => ({...f,[k]:v}));
 
   return React.createElement('div', {className:'space-y-4'},
-    // Toolbar
+    // Toolbar row 1: search + status + actions
     React.createElement('div', {className:'flex flex-wrap gap-2 items-center'},
       React.createElement('input', {
         ref: searchRef,
@@ -468,49 +454,12 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
           React.createElement('option',{key:s,value:s},s)
         )
       ),
-      // Location multi-select dropdown
-      React.createElement('div', {ref:locDropRef, style:{position:'relative'}},
-        React.createElement('button', {
-          className:'px-3 py-2 border border-gray-200 rounded-lg text-sm flex items-center gap-1 bg-white',
-          onClick:()=>setLocOpen(o=>!o)
-        },
-          selectedLocs.size === 0 ? 'All Locations'
-          : selectedLocs.size === 1 ? [...selectedLocs][0]
-          : `${selectedLocs.size} locations`,
-          React.createElement('span', {className:'text-gray-400 ml-1'}, '▾')
-        ),
-        locOpen && React.createElement('div', {
-          className:'absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-30 py-1',
-          style:{minWidth:'220px', maxHeight:'320px', overflowY:'auto'}
-        },
-          // "All" option clears selection
-          React.createElement('label', {className:'flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm gap-0'},
-            React.createElement('input', {
-              type:'checkbox', checked:selectedLocs.size===0,
-              onChange:()=>setSelLocs(new Set()),
-              style:{width:'16px', height:'16px', flexShrink:0, margin:'0 10px 0 0', cursor:'pointer'}
-            }),
-            React.createElement('span', {className:'font-medium'}, 'All Locations')
-          ),
-          React.createElement('hr', {className:'my-1 border-gray-100'}),
-          [...new Set(locations.map(normLoc))].sort().map(loc =>
-            React.createElement('label', {key:loc, className:'flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm gap-0'},
-              React.createElement('input', {
-                type:'checkbox', checked:selectedLocs.has(loc),
-                onChange:()=>toggleLoc(loc),
-                style:{width:'16px', height:'16px', flexShrink:0, margin:'0 10px 0 0', cursor:'pointer'}
-              }),
-              loc
-            )
-          )
-        )
-      ),
       React.createElement('div', {className:'flex items-center gap-3 ml-auto'},
         syncMsg && React.createElement('span', {className:'text-sm text-green-600 font-medium'}, syncMsg),
         React.createElement('span', {className:'text-sm text-gray-400'},
           (() => {
-            const count = selectedLocs.size === 0 ? quotes.length
-              : quotes.filter(q => selectedLocs.has(normLoc(q.location || '(No Location)'))).length;
+            const count = regionFilter === 'All' ? quotes.length
+              : quotes.filter(q => ((q.region||'').trim()||'(No Region)') === regionFilter).length;
             return `${count} quote${count!==1?'s':''}`;
           })()
         ),
@@ -526,6 +475,26 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
         }, syncing ? '⟳ Syncing…' : '↻ Refresh Quotes')
       )
     ),
+    // Toolbar row 2: region tabs
+    React.createElement('div', {className:'flex gap-1.5 flex-wrap'},
+      ['All',...QUOTE_REGION_ORDER,'(No Region)'].map(r =>
+        React.createElement('button', {
+          key: r,
+          onClick: () => setRegionFilter(r),
+          className: 'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+          style: regionFilter === r
+            ? {background:'#1F4E79', color:'#fff'}
+            : {background:'#e2e8f0', color:'#374151'}
+        },
+          r !== 'All' && r !== '(No Region)'
+            ? React.createElement('span', {className:'flex items-center gap-1.5'},
+                React.createElement(TexasMap, {region: r, size: 18}),
+                r
+              )
+            : r
+        )
+      )
+    ),
 
     // Cards layout
     (() => {
@@ -533,19 +502,18 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
       if (quotes.length === 0) return React.createElement('p', {className:'text-center py-12 text-gray-400'}, 'No quotes found.');
 
 
-      // Apply client-side location filter then group
-      const visibleQuotes = selectedLocs.size === 0
+      // Apply region filter then group by region
+      const visibleQuotes = regionFilter === 'All'
         ? quotes
-        : quotes.filter(q => selectedLocs.has(normLoc(q.location || '(No Location)')));
+        : quotes.filter(q => ((q.region||'').trim()||'(No Region)') === regionFilter);
 
-      const grouped   = {};
-      const locLabels = {};
+      const grouped = {};
       visibleQuotes.forEach(q => {
-        const key = normLoc(q.location || '(No Location)');
-        if (!grouped[key]) { grouped[key] = []; locLabels[key] = key; }
+        const key = (q.region||'').trim() || '(No Region)';
+        if (!grouped[key]) grouped[key] = [];
         grouped[key].push(q);
       });
-      const sortedLocs = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+      const sortedLocs = [...QUOTE_REGION_ORDER, '(No Region)'].filter(r => grouped[r]);
 
       const F = (label, value, opts={}) => React.createElement('div', {className: opts.wide ? 'col-span-3' : ''},
         React.createElement('div', {className:'text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5'}, label),
@@ -557,24 +525,43 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
           const locQuotes = grouped[loc];
           const locTotal  = locQuotes.reduce((s, q) => s + (q.amount || 0), 0);
           return React.createElement('div', {key: loc, className:'rounded-lg overflow-hidden shadow-sm border border-gray-200'},
-            // Location header
-            React.createElement('div', {className:'px-4 py-2 bg-[#1F4E79] flex items-center justify-between'},
-              React.createElement('span', {className:'font-bold text-white text-sm tracking-wide'}, locLabels[loc] || loc),
+            // Region header with Texas map icon
+            React.createElement('div', {className:'px-4 py-3 bg-[#1F4E79] flex items-center justify-between'},
+              React.createElement('div', {className:'flex items-center gap-3'},
+                React.createElement(TexasMap, {region: loc}),
+                React.createElement('span', {className:'font-bold text-white text-sm tracking-wide'}, loc)
+              ),
               React.createElement('span', {className:'text-xs text-blue-200'},
                 `${locQuotes.length} quote${locQuotes.length!==1?'s':''} · ${fmt(locTotal)}`)
             ),
             // Quote cards
             React.createElement('div', {},
               locQuotes.map((q, idx) => {
+                const isDup  = q.status === 'Duplicate';
                 const cardBg = q.status==='Won'  ? 'bg-green-100'
                              : q.status==='Lost' ? 'bg-red-100'
+                             : isDup             ? 'bg-gray-100'
                              : 'bg-white';
                 const gap = idx > 0 ? 'mt-3' : '';
+                const isWon = q.status === 'Won';
                 return React.createElement('div', {
                   key: q.id,
-                  className: `${cardBg} ${gap} border-2 border-gray-500 rounded-lg p-4 cursor-pointer hover:brightness-[.97] transition-all`,
+                  className: `${cardBg} ${gap} border-2 ${isDup ? 'border-gray-300' : 'border-gray-500'} rounded-lg p-4 cursor-pointer hover:brightness-[.97] transition-all`,
+                  style: {
+                    position:'relative',
+                    ...(isDup ? {opacity:0.55, textDecorationLine:'line-through'} : {})
+                  },
                   onClick: () => onEdit(q)
                 },
+                  // ⭐ Win star — top-left corner
+                  isWon && React.createElement('div', {
+                    style:{
+                      position:'absolute', top:'-10px', left:'-10px',
+                      fontSize:'26px', lineHeight:1,
+                      filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.25))',
+                      pointerEvents:'none', userSelect:'none'
+                    }
+                  }, '⭐'),
                   // Card header: status + job name + amount + delete
                   React.createElement('div', {className:'flex items-start justify-between mb-3'},
                     React.createElement('div', {className:'flex items-center gap-2 flex-wrap'},
@@ -985,6 +972,77 @@ function SalesTab() {
   );
 }
 
+// ── Texas Region Map ─────────────────────────────────────────────────────────
+// Coordinates derived from real Texas border lat/lon data.
+// Transform: x=(106.65-lon)/13.14*100, y=(36.50-lat)/10.66*100  (viewBox 0 0 100 100)
+//
+// Key border points used (clockwise from NW panhandle):
+//   NW panhandle (103°W,36.5°N)→NE panhandle (100°W,36.5°N)→SE panhandle (100°W,34°N)
+//   →Red River/NE TX (94°W,33.5°N)→Sabine Pass (94°W,29.7°N)→Gulf Coast arc
+//   →Brownsville (97.2°W,25.9°N)→Rio Grande west: Rio Grande City→Laredo→Eagle Pass
+//   →Del Rio→Big Bend (102°W,29°N)→Presidio (104.4°W,29.6°N)→El Paso (106.5°W,31.8°N)
+//   →step east to NM border (103°W,31.8°N)→Z closes N along NM border to panhandle
+function TexasMap({region, size}) {
+  const sz = size || 52;
+  const uid = 'txc' + (region||'x').replace(/\s/g,'') + sz;
+  const outline = [
+    "M27,0",               // NW panhandle corner
+    "L51,0",               // NE panhandle corner
+    "L51,23",              // SE panhandle (meets Red River at 100°W)
+    "L96,28",              // NE Texas / Texarkana area
+    "L97,64",              // E Texas / Sabine River south
+    "L91,66",              // Sabine Pass transition
+    "L90,68",              // Galveston area
+    "L86,70",              // Freeport/Brazoria
+    "L82,72",              // Matagorda Bay
+    "L77,74",              // Port Lavaca
+    "L73,80",              // Aransas Pass / Rockport
+    "L70,81",              // Corpus Christi
+    "L71,84",              // Padre Island north
+    "L72,97",              // Port Isabel
+    "L72,99",              // Brownsville / Rio Grande mouth
+    "L60,95",              // Rio Grande City
+    "L54,85",              // Laredo
+    "L47,73",              // Eagle Pass
+    "L44,67",              // Del Rio
+    "L35,70",              // Big Bend (dips south into Mexico)
+    "L17,65",              // Presidio
+    "L1,44",               // El Paso
+    "L27,44",              // Step east to NM/TX border at 103°W
+    "Z"                    // Closes north along NM border back to NW panhandle
+  ].join(" ");
+
+  // Region highlight polygons — clipped to Texas outline
+  const hl = {
+    // Central TX: Waco / Austin / San Antonio corridor
+    'Central Texas':   {d:"M42,38 L83,38 L83,88 L52,96 L38,82 L36,67 L33,57 Z",  fill:"#3b82f6"},
+    // SE TX: Houston / Beaumont / Port Arthur / Galveston
+    'Southeast Texas': {d:"M76,45 L100,45 L100,80 L84,85 L74,80 L74,58 Z",        fill:"#f97316"},
+    // The Valley: Rio Grande Valley — Laredo / McAllen / Brownsville strip
+    'The Valley':      {d:"M47,82 L75,82 L75,100 L47,100 Z",                       fill:"#16a34a"},
+  };
+  const h = hl[region];
+  return React.createElement('svg', {
+    viewBox:"0 0 100 100", width:sz, height:sz,
+    style:{flexShrink:0, filter:'drop-shadow(0 1px 3px rgba(0,0,0,0.4))'}
+  },
+    React.createElement('defs', {},
+      React.createElement('clipPath', {id:uid},
+        React.createElement('path', {d:outline})
+      )
+    ),
+    // Base state fill
+    React.createElement('path', {d:outline, fill:'#b6c5db', stroke:'#fff', strokeWidth:1.5}),
+    // Region highlight (clipped to state shape)
+    h && React.createElement('path', {
+      d:h.d, fill:h.fill, fillOpacity:0.82,
+      clipPath:`url(#${uid})`
+    }),
+    // Outline on top for crisp edge
+    React.createElement('path', {d:outline, fill:'none', stroke:'#fff', strokeWidth:1.5})
+  );
+}
+
 // ── Customer Directory ────────────────────────────────────────────────────────
 function CustomerDirectory() {
   const [contacts,    setContacts]    = useState([]);
@@ -1374,6 +1432,22 @@ function CustomerDirectory() {
           )
         ),
 
+        // ── Region banner (specific region selected) ──
+        regionFilter !== 'All' && React.createElement('div', {
+          key:'banner',
+          className:'flex items-center gap-4 px-4 py-3 rounded-xl',
+          style:{background:'#1e3a5f'}
+        },
+          React.createElement(TexasMap, {region:regionFilter}),
+          React.createElement('div', {},
+            React.createElement('div', {className:'font-bold text-white text-base'}, regionFilter),
+            React.createElement('div', {
+              className:'text-xs font-medium mt-0.5',
+              style:{color:'#bfdbfe'}
+            }, regionFiltered.length + ' contact' + (regionFiltered.length!==1?'s':''))
+          )
+        ),
+
         // ── Card groups ──
         ...displayGroups.flatMap(({region, byType}) => {
           const typeKeys = Object.keys(byType).sort((a,b) => {
@@ -1387,14 +1461,17 @@ function CustomerDirectory() {
             sections.push(
               React.createElement('div', {
                 key:'region-'+region,
-                className:'flex items-center gap-3 px-4 py-2.5 rounded-xl',
+                className:'flex items-center gap-4 px-4 py-3 rounded-xl',
                 style:{background:'#1e3a5f'}
               },
-                React.createElement('span', {className:'font-bold text-white text-sm'}, '📍 '+region),
-                React.createElement('span', {
-                  className:'text-xs font-medium px-2 py-0.5 rounded-full',
-                  style:{background:'rgba(255,255,255,0.2)', color:'#bfdbfe'}
-                }, regionTotal + ' contact' + (regionTotal!==1?'s':''))
+                React.createElement(TexasMap, {region}),
+                React.createElement('div', {},
+                  React.createElement('div', {className:'font-bold text-white text-base'}, region),
+                  React.createElement('div', {
+                    className:'text-xs font-medium mt-0.5',
+                    style:{color:'#bfdbfe'}
+                  }, regionTotal + ' contact' + (regionTotal!==1?'s':''))
+                )
               )
             );
           }
@@ -1453,8 +1530,12 @@ function App() {
 
   function openEdit(q, cfg) { setModal(q); setModalCfg(cfg || RMAX_CFG); }
   function closeModal(saved) {
+    const y = window.scrollY;          // capture before modal unmounts / focus shifts
     setModal(null);
     if (saved) setRefresh(r => r+1);
+    // Double-rAF: first frame lets React commit + browser process focus change,
+    // second frame runs after any browser-initiated scroll, then we restore.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
   }
 
   function doRefresh(cfg) {
@@ -1519,6 +1600,7 @@ function App() {
         }, '💧 Hydrotech Quotes'),
         React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
+          style:{marginLeft:'auto'},
           onClick:()=>setTab('sales')
         }, '📈 SPECFORM Overall Sales')
       ))
