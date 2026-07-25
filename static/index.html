@@ -110,8 +110,26 @@ function StatusBadge({ status }) {
   }, status);
 }
 
+// ── API configs ───────────────────────────────────────────────────────────────
+const RMAX_CFG = {
+  quotesBase:    '/api/quotes',
+  exportUrl:     '/api/quotes-export',
+  syncUrl:       '/api/sync',
+  dashboardBase: '/api/dashboard',
+  label:         'RMAX',
+  color:         '#1d4ed8',
+};
+const HYDROTECH_CFG = {
+  quotesBase:    '/api/hydrotech-quotes',
+  exportUrl:     '/api/hydrotech-quotes-export',
+  syncUrl:       '/api/hydrotech-sync',
+  dashboardBase: '/api/hydrotech-dashboard',
+  label:         'Hydrotech',
+  color:         '#16a34a',
+};
+
 // ── Quote Modal ───────────────────────────────────────────────────────────────
-function QuoteModal({ quote, onClose, onSave }) {
+function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
   const [form, setForm] = useState(quote || {});
   const [saving, setSaving] = useState(false);
 
@@ -123,9 +141,9 @@ function QuoteModal({ quote, onClose, onSave }) {
       const body = {...form, amount: form.amount ? parseFloat(form.amount) : null};
       const wasWon = quote && quote.status === 'Won';
       if (form.id) {
-        await apiFetch(`/api/quotes/${form.id}`, {method:'PUT', body:JSON.stringify(body)});
+        await apiFetch(`${quotesBase}/${form.id}`, {method:'PUT', body:JSON.stringify(body)});
       } else {
-        await apiFetch('/api/quotes', {method:'POST', body:JSON.stringify(body)});
+        await apiFetch(quotesBase, {method:'POST', body:JSON.stringify(body)});
       }
       if (body.status === 'Won' && !wasWon) fireConfetti();
       onSave();
@@ -366,7 +384,8 @@ function Dashboard() {
 // Normalize state abbreviations for grouping/filtering
 const normLoc = s => (s || '(No Location)').replace(/,?\s+([a-zA-Z]{2})$/, (_, st) => ', ' + st.toUpperCase());
 
-function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg }) {
+function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
+  const { quotesBase, exportUrl, dashboardBase } = cfg;
   const [quotes, setQuotes]       = useState([]);
   const [loading, setLoading]     = useState(true);
   const [filters, setFilters]     = useState({status:'All', search:''});
@@ -395,7 +414,7 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg }) {
     const params = new URLSearchParams();
     if (filters.status !== 'All') params.set('status', filters.status);
     if (filters.search)           params.set('search', filters.search);
-    const data = await apiFetch('/api/quotes?' + params);
+    const data = await apiFetch(quotesBase + '?' + params);
     setQuotes(data);
     if (!silent) setLoading(false);
     if (silent) requestAnimationFrame(() => window.scrollTo(0, savedScroll));
@@ -412,11 +431,11 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh]);
   useEffect(() => {
-    apiFetch('/api/dashboard').then(d => setLocs(d.locations)).catch(()=>{});
+    apiFetch(dashboardBase).then(d => setLocs(d.locations)).catch(()=>{});
   }, []);
 
   async function doDelete(id) {
-    await apiFetch(`/api/quotes/${id}`, {method:'DELETE'});
+    await apiFetch(`${quotesBase}/${id}`, {method:'DELETE'});
     setDeleting(null);
     load();
   }
@@ -492,7 +511,7 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg }) {
         React.createElement('button', {
           className:'btn flex items-center gap-2',
           style:{background:'#16a34a', color:'#fff', border:'none'},
-          onClick: () => { window.location.href = '/api/quotes-export'; }
+          onClick: () => { window.location.href = exportUrl; }
         }, '⬇ Export to Excel'),
         React.createElement('button', {
           className:'btn btn-primary flex items-center gap-2',
@@ -567,7 +586,7 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg }) {
                           checked: !!q.add_to_salesforce,
                           onChange: e => {
                             e.stopPropagation();
-                            apiFetch('/api/quotes/'+q.id, {method:'PUT', body:JSON.stringify({...q, add_to_salesforce: e.target.checked?1:0})}).then(()=>load(true));
+                            apiFetch(`${quotesBase}/${q.id}`, {method:'PUT', body:JSON.stringify({...q, add_to_salesforce: e.target.checked?1:0})}).then(()=>load(true));
                           }
                         }),
                         'Add to Salesforce'
@@ -581,7 +600,7 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg }) {
                           checked: !!q.completed,
                           onChange: e => {
                             e.stopPropagation();
-                            apiFetch('/api/quotes/'+q.id, {method:'PUT', body:JSON.stringify({...q, completed: e.target.checked?1:0})}).then(()=>load(true));
+                            apiFetch(`${quotesBase}/${q.id}`, {method:'PUT', body:JSON.stringify({...q, completed: e.target.checked?1:0})}).then(()=>load(true));
                           }
                         }),
                         'Completed'
@@ -962,23 +981,23 @@ function SalesTab() {
 
 // ── App shell ─────────────────────────────────────────────────────────────────
 function App() {
-  const [tab, setTab]       = useState('quotes');
-  const [modal, setModal]   = useState(null); // null | 'new' | {quote object}
+  const [tab, setTab]         = useState('quotes');
+  const [modal, setModal]     = useState(null);
+  const [modalCfg, setModalCfg] = useState(RMAX_CFG);
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
 
-  function openEdit(q) { setModal(q); }
-  function openNew()   { setModal({}); }
+  function openEdit(q, cfg) { setModal(q); setModalCfg(cfg || RMAX_CFG); }
   function closeModal(saved) {
     setModal(null);
     if (saved) setRefresh(r => r+1);
   }
 
-  function doRefresh() {
+  function doRefresh(cfg) {
     setSyncing(true);
     setSyncMsg('');
-    apiFetch('/api/sync', {method:'POST'})
+    apiFetch(cfg.syncUrl, {method:'POST'})
       .then(data => {
         setSyncMsg(data.inserted > 0
           ? `✓ ${data.inserted} new quote${data.inserted===1?'':'s'} imported`
@@ -1024,6 +1043,11 @@ function App() {
           onClick:()=>setTab('dashboard')
         }, '📊 RMAX Dashboard'),
         React.createElement('button', {
+          className:`tab ${tab==='hydrotech'?'tab-active':'tab-inactive'}`,
+          style: tab==='hydrotech' ? {background:'#16a34a'} : {},
+          onClick:()=>setTab('hydrotech')
+        }, '💧 Hydrotech Quotes'),
+        React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           onClick:()=>setTab('sales')
         }, '📈 SPECFORM Overall Sales')
@@ -1034,14 +1058,30 @@ function App() {
     React.createElement('main', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-6'},
       tab === 'dashboard' ? React.createElement(Dashboard, {key:refresh})
       : tab === 'sales'   ? React.createElement(SalesTab)
-      :                     React.createElement(QuoteList, {refresh, onEdit:openEdit, onRefresh:doRefresh, syncing, syncMsg})
+      : tab === 'hydrotech' ? React.createElement(QuoteList, {
+          key: 'hydrotech-' + refresh,
+          refresh,
+          onEdit: q => openEdit(q, HYDROTECH_CFG),
+          onRefresh: () => doRefresh(HYDROTECH_CFG),
+          syncing, syncMsg,
+          cfg: HYDROTECH_CFG,
+        })
+      : React.createElement(QuoteList, {
+          key: 'rmax-' + refresh,
+          refresh,
+          onEdit: q => openEdit(q, RMAX_CFG),
+          onRefresh: () => doRefresh(RMAX_CFG),
+          syncing, syncMsg,
+          cfg: RMAX_CFG,
+        })
     ),
 
     // Modal
     modal !== null && React.createElement(QuoteModal, {
       quote: Object.keys(modal).length === 0 ? null : modal,
       onClose: () => closeModal(false),
-      onSave:  () => closeModal(true)
+      onSave:  () => closeModal(true),
+      quotesBase: modalCfg.quotesBase,
     })
   );
 }
