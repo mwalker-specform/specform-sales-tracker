@@ -16,7 +16,11 @@ from pydantic import BaseModel
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH  = os.path.join(BASE_DIR, "quotes.db")
+# DATA_DIR can be overridden via env var so the DB lives on a persistent Railway volume.
+# In Railway: set DATA_DIR=/data and mount a volume at /data.
+DATA_DIR = os.environ.get("DATA_DIR", BASE_DIR)
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH  = os.path.join(DATA_DIR, "quotes.db")
 STATIC   = os.path.join(BASE_DIR, "static")
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -1011,17 +1015,23 @@ def init_contacts_db():
     with get_db() as con:
         con.execute("""
         CREATE TABLE IF NOT EXISTS contacts (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            name         TEXT,
-            company      TEXT,
-            phone        TEXT,
-            email        TEXT UNIQUE,
-            location     TEXT,
-            product_line TEXT,
-            notes        TEXT,
-            created_at   TEXT DEFAULT (datetime('now')),
-            updated_at   TEXT DEFAULT (datetime('now'))
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT,
+            company         TEXT,
+            phone           TEXT,
+            email           TEXT UNIQUE,
+            location        TEXT,
+            product_line    TEXT,
+            notes           TEXT,
+            manually_edited INTEGER DEFAULT 0,
+            created_at      TEXT DEFAULT (datetime('now')),
+            updated_at      TEXT DEFAULT (datetime('now'))
         )""")
+        # Add manually_edited column to existing tables that predate this change
+        try:
+            con.execute("ALTER TABLE contacts ADD COLUMN manually_edited INTEGER DEFAULT 0")
+        except Exception:
+            pass  # Column already exists
 
 class ContactIn(BaseModel):
     name:         Optional[str] = None
@@ -1074,7 +1084,7 @@ def update_contact(contact_id: int, c: ContactIn):
             raise HTTPException(404, "Contact not found")
         con.execute("""
         UPDATE contacts SET name=?,company=?,phone=?,email=?,location=?,product_line=?,
-            notes=?,updated_at=datetime('now')
+            notes=?,manually_edited=1,updated_at=datetime('now')
         WHERE id=?
         """, (c.name,c.company,c.phone,c.email,c.location,c.product_line,c.notes,contact_id))
         return {"ok": True}
@@ -1110,8 +1120,12 @@ def import_contacts_from_quotes():
         inserted = skipped = 0
         for email, info in contact_map.items():
             product_line = "Both" if len(info["sources"]) > 1 else list(info["sources"])[0]
-            existing = con.execute("SELECT id, product_line FROM contacts WHERE email=?", (email,)).fetchone()
+            existing = con.execute("SELECT id, product_line, manually_edited FROM contacts WHERE email=?", (email,)).fetchone()
             if existing:
+                # Never touch a contact the user has manually edited
+                if existing["manually_edited"]:
+                    skipped += 1
+                    continue
                 # Upgrade to Both if now seen in both product lines
                 if product_line == "Both" and existing["product_line"] != "Both":
                     con.execute("UPDATE contacts SET product_line='Both',updated_at=datetime('now') WHERE email=?", (email,))
@@ -1258,6 +1272,10 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
 
                 existing = con.execute("SELECT * FROM contacts WHERE email=?", (email,)).fetchone()
                 if existing:
+                    # Never touch a contact the user has manually edited
+                    if existing["manually_edited"]:
+                        skipped += 1
+                        continue
                     updates = {}
                     if name  and not existing["name"]:  updates["name"]  = name
                     if phone and not existing["phone"]: updates["phone"] = phone
