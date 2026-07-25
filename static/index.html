@@ -1191,10 +1191,16 @@ function CustomerDirectory() {
               },
                 // Badge + actions
                 React.createElement('div', {className:'flex items-center justify-between mb-3'},
-                  React.createElement('span', {
-                    className:'text-xs font-semibold px-2 py-0.5 rounded-full text-white',
-                    style:{background:plColor(isEditing?editForm.product_line:c.product_line)}
-                  }, isEditing?(editForm.product_line||'RMAX'):(c.product_line||'—')),
+                  React.createElement('div', {className:'flex items-center gap-1.5'},
+                    React.createElement('span', {
+                      className:'text-xs font-semibold px-2 py-0.5 rounded-full text-white',
+                      style:{background:plColor(isEditing?editForm.product_line:c.product_line)}
+                    }, isEditing?(editForm.product_line||'RMAX'):(c.product_line||'—')),
+                    c.manually_edited && !isEditing && React.createElement('span', {
+                      title:'Manually edited — protected from auto-import overwrites',
+                      className:'text-xs'
+                    }, '🔒')
+                  ),
                   !isEditing && React.createElement('div', {className:'flex gap-1'},
                     React.createElement('button', {
                       title:'Fetch contact info from email signature',
