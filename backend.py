@@ -424,13 +424,20 @@ def _parse_quote_email(subject: str, body_html: str, content_type: str) -> dict:
     if freight:  fields['est_freight'] = freight
     if lead:     fields['lead_time']   = lead
 
-    # Amount: pull any dollar figure from the body (e.g. from price or a total line)
-    amt_m = _sync_re.search(r'\$\s*([\d,]+(?:\.\d{1,2})?)', body)
-    if amt_m:
-        try:
-            fields['amount'] = float(amt_m.group(1).replace(',', ''))
-        except ValueError:
-            pass
+    # Amount: price_per_sf × sf_per_bundle × bundles
+    # Price field example:  "$1.100/sf through Q3, 2026"
+    # Qty field example:    "48 pcs/bundle (1536 sf/bundle) – 52 bundles"
+    try:
+        price_sf_m   = _sync_re.search(r'\$\s*([\d,]+(?:\.\d+)?)\s*/\s*sf', price or '', _sync_re.IGNORECASE)
+        sf_bundle_m  = _sync_re.search(r'([\d,]+)\s*sf\s*/\s*bundle', qty or '', _sync_re.IGNORECASE)
+        bundles_m    = _sync_re.search(r'(\d[\d,]*)\s*bundles?\b', qty or '', _sync_re.IGNORECASE)
+        if price_sf_m and sf_bundle_m and bundles_m:
+            price_per_sf  = float(price_sf_m.group(1).replace(',', ''))
+            sf_per_bundle = float(sf_bundle_m.group(1).replace(',', ''))
+            num_bundles   = float(bundles_m.group(1).replace(',', ''))
+            fields['amount'] = round(price_per_sf * sf_per_bundle * num_bundles, 2)
+    except (AttributeError, ValueError):
+        pass
 
     return fields
 
