@@ -4,9 +4,39 @@ RMAX Quote Tracker — FastAPI backend
 Run: uvicorn backend:app --reload --port 8000
 """
 import os, sqlite3, json, glob as _glob, shutil, tempfile, io, time
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 from typing import Optional
+
+# ── Date parsing helper ───────────────────────────────────────────────────────
+_DATE_FMTS = [
+    '%Y-%m-%d',   # 2026-07-09
+    '%m/%d/%Y',   # 7/9/2026
+    '%m/%d/%y',   # 7/9/26
+    '%b %d, %Y',  # Jul 13, 2026
+    '%B %d, %Y',  # July 13, 2026
+    '%b. %d, %Y', # Jul. 13, 2026
+]
+
+def parse_date(s: str):
+    """Return datetime or None for any of our known date string formats."""
+    if not s:
+        return None
+    s = s.strip()
+    for fmt in _DATE_FMTS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            pass
+    return None
+
+def normalize_date(s: str) -> str:
+    """Convert any supported date string to YYYY-MM-DD; return original if unparseable."""
+    if not s:
+        return s
+    dt = parse_date(s)
+    return dt.strftime('%Y-%m-%d') if dt else s
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
@@ -106,6 +136,29 @@ def startup():
     init_db()
     init_hydrotech_db()
     init_contacts_db()
+    migrate_dates()
+
+def migrate_dates():
+    """One-time migration: normalize any non-ISO date strings in existing rows."""
+    date_cols = ['date_received', 'date_quoted', 'close_date']
+    for table in ('quotes', 'hydrotech_quotes'):
+        try:
+            with get_db() as con:
+                rows = con.execute(f"SELECT id, {', '.join(date_cols)} FROM {table}").fetchall()
+                for row in rows:
+                    updates = {}
+                    for col in date_cols:
+                        val = row[col]
+                        if val and not val[:4].isdigit():  # already ISO if starts with 4 digits
+                            normalized = normalize_date(val)
+                            if normalized != val:
+                                updates[col] = normalized
+                    if updates:
+                        sets = ', '.join(f"{c}=?" for c in updates)
+                        con.execute(f"UPDATE {table} SET {sets} WHERE id=?",
+                                    list(updates.values()) + [row['id']])
+        except Exception:
+            pass
 
 # ── Quote endpoints ───────────────────────────────────────────────────────────
 @app.get("/api/quotes")
@@ -147,9 +200,10 @@ def create_quote(q: QuoteIn):
             customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
             add_to_salesforce,completed)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (q.status,q.date_received,q.date_quoted,q.sent_to,q.subject,q.job_name,
+        """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
+              q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
-              q.close_date,q.est_freight,q.lead_time,q.notes,
+              normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
               q.add_to_salesforce,q.completed))
         return {"id": cur.lastrowid}
 
@@ -165,9 +219,10 @@ def update_quote(quote_id: int, q: QuoteIn):
             close_date=?,est_freight=?,lead_time=?,notes=?,
             add_to_salesforce=?,completed=?,updated_at=datetime('now')
         WHERE id=?
-        """, (q.status,q.date_received,q.date_quoted,q.sent_to,q.subject,q.job_name,
+        """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
+              q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
-              q.close_date,q.est_freight,q.lead_time,q.notes,
+              normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
               q.add_to_salesforce,q.completed,quote_id))
         return {"ok": True}
 
@@ -382,25 +437,25 @@ def dashboard():
             ORDER BY total DESC
         """).fetchall()
 
-        # By month (rolling 12, date_received based — Won + Verbal amounts, total quoted)
-        by_month = con.execute("""
-            SELECT
-                substr(date_received,1,7) as month,
-                COUNT(*)                                                             as total_quotes,
-                COALESCE(SUM(amount),0)                                              as total,
-                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0)   as won,
-                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0)   as verbal,
-                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0)   as lost,
-                COUNT(CASE WHEN status='Won'    THEN 1 END)                          as won_count,
-                COUNT(CASE WHEN status='Verbal' THEN 1 END)                          as verbal_count,
-                COUNT(CASE WHEN status='Lost'   THEN 1 END)                          as lost_count
-            FROM quotes
-            WHERE date_received IS NOT NULL
-              AND date_received != ''
-              AND substr(date_received,1,7) >= substr(date('now','-11 months'),1,7)
-            GROUP BY month
-            ORDER BY month
-        """).fetchall()
+        # By month — parse dates in Python to handle M/D/YYYY, "Jul 13, 2026", etc.
+        cutoff = datetime.now().replace(day=1) - timedelta(days=335)  # ~11 months ago
+        raw_quotes = con.execute(
+            "SELECT date_received, status, amount FROM quotes WHERE date_received IS NOT NULL AND date_received != ''"
+        ).fetchall()
+        month_acc = defaultdict(lambda: dict(total_quotes=0,total=0.0,won=0.0,verbal=0.0,lost=0.0,won_count=0,verbal_count=0,lost_count=0))
+        for row in raw_quotes:
+            dt = parse_date(row["date_received"])
+            if not dt or dt < cutoff:
+                continue
+            ym = dt.strftime('%Y-%m')
+            amt = row["amount"] or 0
+            st  = row["status"] or ''
+            month_acc[ym]['total_quotes'] += 1
+            month_acc[ym]['total']        += amt
+            if st == 'Won':    month_acc[ym]['won']    += amt; month_acc[ym]['won_count']    += 1
+            if st == 'Verbal': month_acc[ym]['verbal'] += amt; month_acc[ym]['verbal_count'] += 1
+            if st == 'Lost':   month_acc[ym]['lost']   += amt; month_acc[ym]['lost_count']   += 1
+        by_month = [{'month': k, **v} for k, v in sorted(month_acc.items())]
 
         # Status breakdown
         by_status = con.execute("""
