@@ -375,89 +375,55 @@ def _strip_tags(html: str) -> str:
                 .replace('&lt;', '<').replace('&gt;', '>').replace('\r', ''))
 
 def _parse_quote_email(subject: str, body_html: str, content_type: str) -> dict:
-    """Extract quote fields from an email's subject + body."""
+    """
+    Parse a quote-request email whose body follows the standard template:
+        Job Name: XYZ
+        Customer: XYZ
+        Location: XYZ
+        Product: XYZ
+        Price: XYZ
+        Quantities: XYZ
+        Estimated Freight: XYZ
+        Lead time: XYZ
+    """
     body = _strip_tags(body_html) if content_type == "html" else body_html
-    # Collapse excessive blank lines
     body = _sync_re.sub(r'\n{3,}', '\n\n', body).strip()
+
+    def _field(label: str) -> str:
+        """Extract the value after 'Label:' on the same line."""
+        m = _sync_re.search(
+            rf'^\s*{_sync_re.escape(label)}\s*:\s*(.+)',
+            body, _sync_re.IGNORECASE | _sync_re.MULTILINE
+        )
+        return m.group(1).strip() if m else ''
 
     fields = {}
 
-    # ── Job name: strip reply/forward prefixes from subject ───────────────────
-    job = _sync_re.sub(r'^(fw:|re:|fwd:)\s*', '', subject or '', flags=_sync_re.IGNORECASE).strip()
-    if job:
-        fields['job_name'] = job
+    job      = _field('Job Name')
+    customer = _field('Customer')
+    location = _field('Location')
+    product  = _field('Product')
+    price    = _field('Price')
+    qty      = _field('Quantities')
+    freight  = _field('Estimated Freight')
+    lead     = _field('Lead time') or _field('Lead Time')
 
-    # ── Amount: largest dollar value in the email ─────────────────────────────
-    amounts = _sync_re.findall(r'\$\s*([\d,]+(?:\.\d{1,2})?)', body)
-    if amounts:
-        parsed = []
-        for a in amounts:
-            try: parsed.append(float(a.replace(',', '')))
-            except ValueError: pass
-        if parsed:
-            fields['amount'] = max(parsed)
+    if job:      fields['job_name']    = job
+    if customer: fields['customer']    = customer
+    if location: fields['location']    = location
+    if product:  fields['product']     = product
+    if price:    fields['price']       = price
+    if qty:      fields['quantities']  = qty
+    if freight:  fields['est_freight'] = freight
+    if lead:     fields['lead_time']   = lead
 
-    # ── Product: lines that mention insulation/product keywords ──────────────
-    prod_lines = []
-    for line in body.split('\n'):
-        if _sync_re.search(
-            r'(therm|energy.?shield|rmax|polyiso|iso board|r-?\d{1,2}|insul|ci board|eps|xps|spf)',
-            line, _sync_re.IGNORECASE
-        ):
-            clean = line.strip(' -•*\t')
-            if clean and len(clean) < 300:
-                prod_lines.append(clean)
-    if prod_lines:
-        fields['product'] = '\n'.join(prod_lines[:8])
-
-    # ── Price per unit ────────────────────────────────────────────────────────
-    price_m = _sync_re.search(
-        r'(?:price|unit price|per\s+(?:board|sq\.?\s*ft\.?|sf))[:\s]*\$?([\d,]+(?:\.\d{1,2})?)',
-        body, _sync_re.IGNORECASE
-    )
-    if price_m:
-        fields['price'] = '$' + price_m.group(1).strip()
-
-    # ── Quantities ────────────────────────────────────────────────────────────
-    qty_m = _sync_re.search(
-        r'(?:qty|quantity|quantities|sq\.?\s*ft\.?|square\s*feet|sf)[:\s]*([\d,]+\s*(?:sq\.?\s*ft\.?|sf|sqft|lf|pcs|pieces|sheets|boards)?)',
-        body, _sync_re.IGNORECASE
-    )
-    if qty_m:
-        fields['quantities'] = qty_m.group(1).strip()
-
-    # ── Location: labeled field or Texas city patterns ────────────────────────
-    loc_m = _sync_re.search(
-        r'(?:location|job\s*site|project\s*(?:location|address|city)|city|site\s*address)[:\s]+([^\n,<]{3,60})',
-        body, _sync_re.IGNORECASE
-    )
-    if loc_m:
-        fields['location'] = loc_m.group(1).strip().rstrip('.')
-    else:
-        # Fall back to recognising common Texas city names
-        tx_cities = (r'\b(Houston|Austin|San Antonio|Dallas|Fort Worth|El Paso|Arlington|'
-                     r'Corpus Christi|Plano|Laredo|Lubbock|Garland|Irving|Amarillo|'
-                     r'Grand Prairie|McKinney|Frisco|Brownsville|Pasadena|Killeen|'
-                     r'McAllen|Mesquite|Midland|Denton|Waco|Carrollton|Round Rock|'
-                     r'Beaumont|Abilene|Odessa|Sugar Land|The Woodlands|Conroe|'
-                     r'Harlingen|Edinburg|Mission|Victoria|Temple|College Station)[,\s]*(TX|Texas)?\b')
-        city_m = _sync_re.search(tx_cities, body, _sync_re.IGNORECASE)
-        if city_m:
-            city = city_m.group(1)
-            state = city_m.group(2) or 'TX'
-            fields['location'] = f"{city}, {state}"
-
-    # ── Customer / company name ───────────────────────────────────────────────
-    co_m = _sync_re.search(
-        r'(?:company|contractor|firm|customer|gc|general contractor)[:\s]+([^\n<]{2,80})',
-        body, _sync_re.IGNORECASE
-    )
-    if co_m:
-        fields['customer'] = co_m.group(1).strip().rstrip('.')
-
-    # ── Notes: cleaned body (first 1 500 chars) ───────────────────────────────
-    if body and len(body) > 30:
-        fields['notes'] = body[:1500]
+    # Amount: pull any dollar figure from the body (e.g. from price or a total line)
+    amt_m = _sync_re.search(r'\$\s*([\d,]+(?:\.\d{1,2})?)', body)
+    if amt_m:
+        try:
+            fields['amount'] = float(amt_m.group(1).replace(',', ''))
+        except ValueError:
+            pass
 
     return fields
 
@@ -550,13 +516,13 @@ def sync_from_outlook():
                 con.execute("""
                 INSERT INTO quotes
                     (date_received, sent_to, subject, job_name, customer, location,
-                     product, price, quantities, amount, notes)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                     product, price, quantities, amount, est_freight, lead_time)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     date_received, sent_to, subject,
                     parsed.get('job_name'), parsed.get('customer'), parsed.get('location'),
                     parsed.get('product'), parsed.get('price'), parsed.get('quantities'),
-                    parsed.get('amount'), parsed.get('notes'),
+                    parsed.get('amount'), parsed.get('est_freight'), parsed.get('lead_time'),
                 ))
                 inserted += 1
 
