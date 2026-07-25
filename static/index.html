@@ -998,8 +998,6 @@ function CustomerDirectory() {
   const [sigFetching, setSigFetching] = useState(null);
   const [adding,      setAdding]      = useState(false);
   const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',notes:''});
-  const [sortBy,      setSortBy]      = useState('company');
-  const [sortDir,     setSortDir]     = useState('asc');
   const CUSTOMER_TYPES = ['','Contractor','Distributor','General Contractor','Architect'];
 
   function loadContacts(f, s) {
@@ -1082,20 +1080,24 @@ function CustomerDirectory() {
   const plBg   = pl => pl==='RMAX'?'#dbeafe' : pl==='Hydrotech'?'#dcfce7' : '#ede9fe';
   const plText = pl => pl==='RMAX'?'#1e40af' : pl==='Hydrotech'?'#15803d' : '#6d28d9';
 
-  function toggleSort(col) {
-    if (sortBy===col) setSortDir(d => d==='asc' ? 'desc' : 'asc');
-    else { setSortBy(col); setSortDir('asc'); }
-  }
-
-  const sorted = [...contacts].sort((a, b) => {
-    const av = (a[sortBy]||'').toString().toLowerCase();
-    const bv = (b[sortBy]||'').toString().toLowerCase();
-    return sortDir==='asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-  });
-
   // Stats
   const typeCount = {};
   contacts.forEach(c => { const t = c.customer_type||'Unclassified'; typeCount[t]=(typeCount[t]||0)+1; });
+
+  // Group by city → customer type, sorted alphabetically within each group
+  const TYPE_ORDER = ['Contractor','General Contractor','Distributor','Architect','Unclassified'];
+  const byCity = {};
+  [...contacts].sort((a,b) => (a.company||'').toLowerCase().localeCompare((b.company||'').toLowerCase()))
+    .forEach(c => {
+      const city = (c.location||'').trim() || '(No Location)';
+      const type = c.customer_type || 'Unclassified';
+      if (!byCity[city]) byCity[city] = {};
+      if (!byCity[city][type]) byCity[city][type] = [];
+      byCity[city][type].push(c);
+    });
+  const cityKeys = Object.keys(byCity).sort((a,b) =>
+    a==='(No Location)' ? 1 : b==='(No Location)' ? -1 : a.localeCompare(b)
+  );
 
   // Shared form field renderer
   function formField(label, key, form, setForm, type) {
@@ -1154,15 +1156,8 @@ function CustomerDirectory() {
     );
   }
 
-  const COLS = [
-    {label:'Name',     col:'name'},
-    {label:'Company',  col:'company'},
-    {label:'Type',     col:'customer_type'},
-    {label:'Product',  col:'product_line'},
-    {label:'Location', col:'location'},
-    {label:'Email',    col:'email'},
-    {label:'Phone',    col:'phone'},
-  ];
+  const typeColor = t => t==='Contractor'?'#1d4ed8':t==='Distributor'?'#16a34a':t==='General Contractor'?'#7c3aed':t==='Architect'?'#b45309':'#6b7280';
+  const typeBg    = t => t==='Contractor'?'#dbeafe':t==='Distributor'?'#dcfce7':t==='General Contractor'?'#ede9fe':t==='Architect'?'#fef3c7':'#f3f4f6';
 
   return React.createElement('div', {className:'space-y-4'},
 
@@ -1222,7 +1217,7 @@ function CustomerDirectory() {
       )
     ),
 
-    // ── Table ──
+    // ── Grouped table ──
     loading
       ? React.createElement('div', {className:'text-center py-16 text-gray-400'}, 'Loading contacts…')
     : contacts.length === 0
@@ -1232,103 +1227,109 @@ function CustomerDirectory() {
           React.createElement('p', {className:'text-sm text-gray-400'}, 'Click "⬇ Import from Quotes" or "+ Add Contact" to get started.')
         )
       : React.createElement('div', {className:'bg-white rounded-xl border shadow-sm overflow-x-auto'},
-          React.createElement('table', {className:'w-full text-sm', style:{minWidth:'700px'}},
+          React.createElement('table', {className:'w-full text-sm', style:{minWidth:'620px'}},
             React.createElement('thead', {},
               React.createElement('tr', {className:'border-b', style:{background:'#f8fafc'}},
-                COLS.map(({label, col}) =>
-                  React.createElement('th', {
-                    key:col, onClick:()=>toggleSort(col),
-                    className:'text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer select-none whitespace-nowrap hover:text-gray-800 transition-colors',
-                  },
-                    React.createElement('span', {className:'inline-flex items-center gap-1'},
-                      label,
-                      React.createElement('span', {style:{fontSize:'10px', color: sortBy===col ? '#3b82f6' : '#d1d5db'}},
-                        sortBy===col ? (sortDir==='asc' ? '▲' : '▼') : '⇅'
-                      )
-                    )
-                  )
-                ),
+                React.createElement('th', {className:'text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide'}, 'Name'),
+                React.createElement('th', {className:'text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide'}, 'Company'),
+                React.createElement('th', {className:'text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide'}, 'Product'),
+                React.createElement('th', {className:'text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide'}, 'Email'),
+                React.createElement('th', {className:'text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide'}, 'Phone'),
                 React.createElement('th', {className:'px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right'}, 'Actions')
               )
             ),
             React.createElement('tbody', {},
-              sorted.map((c, i) =>
-                React.createElement('tr', {
-                  key:c.id,
-                  className:'border-b last:border-0 transition-colors',
-                  style:{background: i%2===1 ? '#f9fafb' : '#ffffff'},
-                  onMouseEnter: e => e.currentTarget.style.background='#eff6ff',
-                  onMouseLeave: e => e.currentTarget.style.background = i%2===1 ? '#f9fafb' : '#ffffff',
-                },
-                  React.createElement('td', {className:'px-4 py-3'},
-                    React.createElement('div', {className:'flex items-center gap-1.5'},
-                      React.createElement('span', {className:'font-medium text-gray-900 whitespace-nowrap'},
-                        c.name || React.createElement('span', {className:'text-gray-300 italic font-normal'}, '—')
+              ...cityKeys.flatMap(city => {
+                const typeKeys = Object.keys(byCity[city]).sort((a,b) => {
+                  const ai = TYPE_ORDER.indexOf(a); const bi = TYPE_ORDER.indexOf(b);
+                  return (ai===-1?99:ai) - (bi===-1?99:bi);
+                });
+                const cityTotal = typeKeys.reduce((s,t) => s + byCity[city][t].length, 0);
+                return [
+                  // ── City header ──
+                  React.createElement('tr', {key:'city-'+city},
+                    React.createElement('td', {colSpan:6, className:'px-4 py-2.5', style:{background:'#1e3a5f'}},
+                      React.createElement('div', {className:'flex items-center gap-3'},
+                        React.createElement('span', {className:'font-bold text-white text-sm'}, '📍 '+city),
+                        React.createElement('span', {className:'text-xs font-medium px-2 py-0.5 rounded-full', style:{background:'rgba(255,255,255,0.2)', color:'#bfdbfe'}},
+                          cityTotal + ' contact' + (cityTotal!==1?'s':'')
+                        )
+                      )
+                    )
+                  ),
+                  // ── Types within city ──
+                  ...typeKeys.flatMap(type => {
+                    const rows = byCity[city][type];
+                    return [
+                      React.createElement('tr', {key:'type-'+city+'-'+type},
+                        React.createElement('td', {colSpan:6, className:'px-4 py-1.5 border-b', style:{background:'#f0f4ff'}},
+                          React.createElement('span', {
+                            className:'inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide px-2.5 py-0.5 rounded-full',
+                            style:{background:typeBg(type), color:typeColor(type)}
+                          }, type, React.createElement('span',{style:{opacity:0.6}}, '·'), rows.length)
+                        )
                       ),
-                      c.manually_edited && React.createElement('span', {
-                        title:'Manually edited — protected from auto-import overwrites', className:'text-xs flex-shrink-0'
-                      }, '🔒')
-                    )
-                  ),
-                  React.createElement('td', {className:'px-4 py-3'},
-                    React.createElement('span', {className:'font-medium text-gray-800 whitespace-nowrap'},
-                      c.company || React.createElement('span', {className:'text-gray-300 font-normal'}, '—')
-                    )
-                  ),
-                  React.createElement('td', {className:'px-4 py-3'},
-                    c.customer_type
-                      ? React.createElement('span', {
-                          className:'inline-block text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap',
-                          style:{background:'#eef2ff', color:'#4338ca'}
-                        }, c.customer_type)
-                      : React.createElement('span', {className:'text-gray-300 text-xs'}, '—')
-                  ),
-                  React.createElement('td', {className:'px-4 py-3'},
-                    React.createElement('span', {
-                      className:'inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full whitespace-nowrap',
-                      style:{background:plBg(c.product_line), color:plText(c.product_line)}
-                    }, c.product_line || '—')
-                  ),
-                  React.createElement('td', {className:'px-4 py-3 text-gray-600 whitespace-nowrap', style:{maxWidth:'160px'}},
-                    React.createElement('span', {className:'block truncate', title:c.location||''},
-                      c.location || React.createElement('span', {className:'text-gray-300'}, '—')
-                    )
-                  ),
-                  React.createElement('td', {className:'px-4 py-3', style:{maxWidth:'210px'}},
-                    c.email
-                      ? React.createElement('a', {
-                          href:`mailto:${c.email}`, className:'text-blue-600 hover:underline block truncate',
-                          title:c.email, onClick:e=>e.stopPropagation()
-                        }, c.email)
-                      : React.createElement('span', {className:'text-gray-300 text-xs'}, '—')
-                  ),
-                  React.createElement('td', {className:'px-4 py-3 whitespace-nowrap'},
-                    c.phone
-                      ? React.createElement('a', {href:`tel:${c.phone}`, className:'text-gray-700 hover:text-blue-600', onClick:e=>e.stopPropagation()}, c.phone)
-                      : React.createElement('span', {className:'text-gray-300 text-xs'}, '—')
-                  ),
-                  React.createElement('td', {className:'px-4 py-3'},
-                    React.createElement('div', {className:'flex gap-1 justify-end'},
-                      React.createElement('button', {
-                        title:'Fetch contact info from email signature',
-                        onClick:e=>{e.stopPropagation(); c.email && fetchSig(c.email, c.id);},
-                        disabled:sigFetching===c.email || !c.email,
-                        className:'text-gray-400 hover:text-blue-600 px-2 py-1 rounded-md text-xs border border-transparent hover:border-blue-200 hover:bg-blue-50 transition-colors'
-                      }, sigFetching===c.email ? '⏳' : '✉'),
-                      React.createElement('button', {
-                        title:'Edit contact',
-                        onClick:e=>{e.stopPropagation(); startEdit(c);},
-                        className:'text-gray-400 hover:text-blue-600 px-2 py-1 rounded-md text-xs border border-transparent hover:border-blue-200 hover:bg-blue-50 transition-colors'
-                      }, '✏️'),
-                      React.createElement('button', {
-                        title:'Delete contact',
-                        onClick:e=>{e.stopPropagation(); deleteContact(c.id);},
-                        className:'text-gray-400 hover:text-red-500 px-2 py-1 rounded-md text-xs border border-transparent hover:border-red-200 hover:bg-red-50 transition-colors'
-                      }, '🗑')
-                    )
-                  )
-                )
-              )
+                      ...rows.map((c, i) =>
+                        React.createElement('tr', {
+                          key:c.id,
+                          className:'border-b transition-colors',
+                          style:{background: i%2===1 ? '#f9fafb' : '#ffffff'},
+                          onMouseEnter: e => e.currentTarget.style.background='#eff6ff',
+                          onMouseLeave: e => e.currentTarget.style.background = i%2===1 ? '#f9fafb' : '#ffffff',
+                        },
+                          React.createElement('td', {className:'px-4 py-2.5'},
+                            React.createElement('div', {className:'flex items-center gap-1.5'},
+                              React.createElement('span', {className:'font-medium text-gray-900'},
+                                c.name || React.createElement('span',{className:'text-gray-300 italic font-normal'},'—')
+                              ),
+                              c.manually_edited && React.createElement('span',{title:'Manually edited — protected from auto-import overwrites',className:'text-xs flex-shrink-0'},'🔒')
+                            )
+                          ),
+                          React.createElement('td', {className:'px-4 py-2.5'},
+                            React.createElement('span', {className:'font-medium text-gray-800'},
+                              c.company || React.createElement('span',{className:'text-gray-300 font-normal'},'—')
+                            )
+                          ),
+                          React.createElement('td', {className:'px-4 py-2.5'},
+                            React.createElement('span', {
+                              className:'inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full whitespace-nowrap',
+                              style:{background:plBg(c.product_line), color:plText(c.product_line)}
+                            }, c.product_line||'—')
+                          ),
+                          React.createElement('td', {className:'px-4 py-2.5', style:{maxWidth:'210px'}},
+                            c.email
+                              ? React.createElement('a',{href:`mailto:${c.email}`,className:'text-blue-600 hover:underline block truncate',title:c.email,onClick:e=>e.stopPropagation()},c.email)
+                              : React.createElement('span',{className:'text-gray-300 text-xs'},'—')
+                          ),
+                          React.createElement('td', {className:'px-4 py-2.5 whitespace-nowrap'},
+                            c.phone
+                              ? React.createElement('a',{href:`tel:${c.phone}`,className:'text-gray-700 hover:text-blue-600',onClick:e=>e.stopPropagation()},c.phone)
+                              : React.createElement('span',{className:'text-gray-300 text-xs'},'—')
+                          ),
+                          React.createElement('td', {className:'px-4 py-2.5'},
+                            React.createElement('div', {className:'flex gap-1 justify-end'},
+                              React.createElement('button', {
+                                title:'Fetch contact info from email signature',
+                                onClick:e=>{e.stopPropagation(); c.email&&fetchSig(c.email,c.id);},
+                                disabled:sigFetching===c.email||!c.email,
+                                className:'text-gray-400 hover:text-blue-600 px-2 py-1 rounded-md text-xs border border-transparent hover:border-blue-200 hover:bg-blue-50 transition-colors'
+                              }, sigFetching===c.email?'⏳':'✉'),
+                              React.createElement('button', {
+                                title:'Edit contact', onClick:e=>{e.stopPropagation();startEdit(c);},
+                                className:'text-gray-400 hover:text-blue-600 px-2 py-1 rounded-md text-xs border border-transparent hover:border-blue-200 hover:bg-blue-50 transition-colors'
+                              }, '✏️'),
+                              React.createElement('button', {
+                                title:'Delete contact', onClick:e=>{e.stopPropagation();deleteContact(c.id);},
+                                className:'text-gray-400 hover:text-red-500 px-2 py-1 rounded-md text-xs border border-transparent hover:border-red-200 hover:bg-red-50 transition-colors'
+                              }, '🗑')
+                            )
+                          )
+                        )
+                      )
+                    ];
+                  })
+                ];
+              })
             )
           )
         ),
