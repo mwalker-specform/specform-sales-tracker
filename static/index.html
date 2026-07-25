@@ -566,13 +566,16 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
             // Quote cards
             React.createElement('div', {},
               locQuotes.map((q, idx) => {
+                const isDup  = q.status === 'Duplicate';
                 const cardBg = q.status==='Won'  ? 'bg-green-100'
                              : q.status==='Lost' ? 'bg-red-100'
+                             : isDup             ? 'bg-gray-100'
                              : 'bg-white';
                 const gap = idx > 0 ? 'mt-3' : '';
                 return React.createElement('div', {
                   key: q.id,
-                  className: `${cardBg} ${gap} border-2 border-gray-500 rounded-lg p-4 cursor-pointer hover:brightness-[.97] transition-all`,
+                  className: `${cardBg} ${gap} border-2 ${isDup ? 'border-gray-300' : 'border-gray-500'} rounded-lg p-4 cursor-pointer hover:brightness-[.97] transition-all`,
+                  style: isDup ? {opacity:0.55, textDecorationLine:'line-through'} : {},
                   onClick: () => onEdit(q)
                 },
                   // Card header: status + job name + amount + delete
