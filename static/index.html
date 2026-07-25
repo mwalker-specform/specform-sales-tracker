@@ -572,12 +572,25 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
                              : isDup             ? 'bg-gray-100'
                              : 'bg-white';
                 const gap = idx > 0 ? 'mt-3' : '';
+                const isWon = q.status === 'Won';
                 return React.createElement('div', {
                   key: q.id,
                   className: `${cardBg} ${gap} border-2 ${isDup ? 'border-gray-300' : 'border-gray-500'} rounded-lg p-4 cursor-pointer hover:brightness-[.97] transition-all`,
-                  style: isDup ? {opacity:0.55, textDecorationLine:'line-through'} : {},
+                  style: {
+                    position:'relative',
+                    ...(isDup ? {opacity:0.55, textDecorationLine:'line-through'} : {})
+                  },
                   onClick: () => onEdit(q)
                 },
+                  // ⭐ Win star — top-left corner
+                  isWon && React.createElement('div', {
+                    style:{
+                      position:'absolute', top:'-10px', left:'-10px',
+                      fontSize:'26px', lineHeight:1,
+                      filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.25))',
+                      pointerEvents:'none', userSelect:'none'
+                    }
+                  }, '⭐'),
                   // Card header: status + job name + amount + delete
                   React.createElement('div', {className:'flex items-start justify-between mb-3'},
                     React.createElement('div', {className:'flex items-center gap-2 flex-wrap'},
