@@ -362,15 +362,114 @@ def export_quotes():
     )
 
 # ── Sync endpoint — pulls directly from Outlook "RMAX Quotes" folder ──────────
+import re as _sync_re
+
+def _strip_tags(html: str) -> str:
+    """Minimal HTML→text for use before _strip_html is defined."""
+    html = _sync_re.sub(r'<style[^>]*>.*?</style>', '', html, flags=_sync_re.DOTALL|_sync_re.IGNORECASE)
+    html = _sync_re.sub(r'<script[^>]*>.*?</script>', '', html, flags=_sync_re.DOTALL|_sync_re.IGNORECASE)
+    html = _sync_re.sub(r'<br\s*/?>', '\n', html, flags=_sync_re.IGNORECASE)
+    html = _sync_re.sub(r'</?(?:p|div|tr|td|li|h\d)[^>]*>', '\n', html, flags=_sync_re.IGNORECASE)
+    html = _sync_re.sub(r'<[^>]+>', '', html)
+    return (html.replace('&nbsp;', ' ').replace('&amp;', '&')
+                .replace('&lt;', '<').replace('&gt;', '>').replace('\r', ''))
+
+def _parse_quote_email(subject: str, body_html: str, content_type: str) -> dict:
+    """Extract quote fields from an email's subject + body."""
+    body = _strip_tags(body_html) if content_type == "html" else body_html
+    # Collapse excessive blank lines
+    body = _sync_re.sub(r'\n{3,}', '\n\n', body).strip()
+
+    fields = {}
+
+    # ── Job name: strip reply/forward prefixes from subject ───────────────────
+    job = _sync_re.sub(r'^(fw:|re:|fwd:)\s*', '', subject or '', flags=_sync_re.IGNORECASE).strip()
+    if job:
+        fields['job_name'] = job
+
+    # ── Amount: largest dollar value in the email ─────────────────────────────
+    amounts = _sync_re.findall(r'\$\s*([\d,]+(?:\.\d{1,2})?)', body)
+    if amounts:
+        parsed = []
+        for a in amounts:
+            try: parsed.append(float(a.replace(',', '')))
+            except ValueError: pass
+        if parsed:
+            fields['amount'] = max(parsed)
+
+    # ── Product: lines that mention insulation/product keywords ──────────────
+    prod_lines = []
+    for line in body.split('\n'):
+        if _sync_re.search(
+            r'(therm|energy.?shield|rmax|polyiso|iso board|r-?\d{1,2}|insul|ci board|eps|xps|spf)',
+            line, _sync_re.IGNORECASE
+        ):
+            clean = line.strip(' -•*\t')
+            if clean and len(clean) < 300:
+                prod_lines.append(clean)
+    if prod_lines:
+        fields['product'] = '\n'.join(prod_lines[:8])
+
+    # ── Price per unit ────────────────────────────────────────────────────────
+    price_m = _sync_re.search(
+        r'(?:price|unit price|per\s+(?:board|sq\.?\s*ft\.?|sf))[:\s]*\$?([\d,]+(?:\.\d{1,2})?)',
+        body, _sync_re.IGNORECASE
+    )
+    if price_m:
+        fields['price'] = '$' + price_m.group(1).strip()
+
+    # ── Quantities ────────────────────────────────────────────────────────────
+    qty_m = _sync_re.search(
+        r'(?:qty|quantity|quantities|sq\.?\s*ft\.?|square\s*feet|sf)[:\s]*([\d,]+\s*(?:sq\.?\s*ft\.?|sf|sqft|lf|pcs|pieces|sheets|boards)?)',
+        body, _sync_re.IGNORECASE
+    )
+    if qty_m:
+        fields['quantities'] = qty_m.group(1).strip()
+
+    # ── Location: labeled field or Texas city patterns ────────────────────────
+    loc_m = _sync_re.search(
+        r'(?:location|job\s*site|project\s*(?:location|address|city)|city|site\s*address)[:\s]+([^\n,<]{3,60})',
+        body, _sync_re.IGNORECASE
+    )
+    if loc_m:
+        fields['location'] = loc_m.group(1).strip().rstrip('.')
+    else:
+        # Fall back to recognising common Texas city names
+        tx_cities = (r'\b(Houston|Austin|San Antonio|Dallas|Fort Worth|El Paso|Arlington|'
+                     r'Corpus Christi|Plano|Laredo|Lubbock|Garland|Irving|Amarillo|'
+                     r'Grand Prairie|McKinney|Frisco|Brownsville|Pasadena|Killeen|'
+                     r'McAllen|Mesquite|Midland|Denton|Waco|Carrollton|Round Rock|'
+                     r'Beaumont|Abilene|Odessa|Sugar Land|The Woodlands|Conroe|'
+                     r'Harlingen|Edinburg|Mission|Victoria|Temple|College Station)[,\s]*(TX|Texas)?\b')
+        city_m = _sync_re.search(tx_cities, body, _sync_re.IGNORECASE)
+        if city_m:
+            city = city_m.group(1)
+            state = city_m.group(2) or 'TX'
+            fields['location'] = f"{city}, {state}"
+
+    # ── Customer / company name ───────────────────────────────────────────────
+    co_m = _sync_re.search(
+        r'(?:company|contractor|firm|customer|gc|general contractor)[:\s]+([^\n<]{2,80})',
+        body, _sync_re.IGNORECASE
+    )
+    if co_m:
+        fields['customer'] = co_m.group(1).strip().rstrip('.')
+
+    # ── Notes: cleaned body (first 1 500 chars) ───────────────────────────────
+    if body and len(body) > 30:
+        fields['notes'] = body[:1500]
+
+    return fields
+
+
 @app.post("/api/sync")
 def sync_from_outlook():
     """
-    Pull new emails from the 'RMAX Quotes' Outlook folder via Graph API and
-    create quote records for any that aren't already in the database.
+    Pull new emails from the 'RMAX Quotes' Outlook folder via Graph API,
+    parse each email body to pre-populate quote fields, and insert any
+    that are not already in the database.
     Falls back to sync_pending.json if Graph is not configured.
     """
-    import json as _json
-
     # ── Primary path: Graph API ───────────────────────────────────────────────
     if GRAPH_CLIENT_SECRET:
         try:
@@ -384,55 +483,57 @@ def sync_from_outlook():
 
         hdrs = {"Authorization": f"Bearer {token}"}
 
-        # Find the "RMAX Quotes" mail folder (top-level or Inbox child)
+        # ── Find "RMAX Quotes" folder ─────────────────────────────────────────
+        # List all top-level and Inbox child folders, match by name
         folder_id = None
-        for url in [
-            f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders"
-            f"?$filter=displayName eq 'RMAX Quotes'&$select=id",
-            f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/Inbox/childFolders"
-            f"?$filter=displayName eq 'RMAX Quotes'&$select=id",
+        for list_url in [
+            f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders?$select=id,displayName&$top=100",
+            f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/Inbox/childFolders?$select=id,displayName&$top=100",
         ]:
             try:
-                r = _req.get(url, headers=hdrs, timeout=20)
+                r = _req.get(list_url, headers=hdrs, timeout=20)
                 if r.status_code == 200:
-                    vals = r.json().get("value", [])
-                    if vals:
-                        folder_id = vals[0]["id"]
-                        break
+                    for f in r.json().get("value", []):
+                        if (f.get("displayName") or "").strip().lower() == "rmax quotes":
+                            folder_id = f["id"]
+                            break
+                if folder_id:
+                    break
             except Exception:
                 pass
 
         if not folder_id:
             return {"inserted": 0, "skipped": 0,
-                    "message": "Could not find 'RMAX Quotes' folder in Outlook"}
+                    "message": "Could not find 'RMAX Quotes' folder in Outlook — check folder name"}
 
-        # Fetch up to 250 most-recent messages (dedup handles repeats)
+        # ── Fetch messages with body ──────────────────────────────────────────
         msgs = []
         next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
                     f"/mailFolders/{folder_id}/messages"
-                    f"?$select=from,subject,receivedDateTime"
-                    f"&$orderby=receivedDateTime desc&$top=100")
-        while next_url and len(msgs) < 250:
+                    f"?$select=from,subject,receivedDateTime,body&$top=50")
+        while next_url and len(msgs) < 200:
             try:
                 r = _req.get(next_url, headers=hdrs, timeout=30)
                 if r.status_code != 200:
-                    break
+                    return {"inserted": 0, "skipped": 0,
+                            "message": f"Graph API error {r.status_code}: {r.text[:200]}"}
                 data = r.json()
                 msgs.extend(data.get("value", []))
                 next_url = data.get("@odata.nextLink")
-            except Exception:
-                break
+            except Exception as e:
+                return {"inserted": 0, "skipped": 0, "message": f"Fetch error: {e}"}
 
+        # ── Insert new quotes ─────────────────────────────────────────────────
         inserted = skipped = 0
         with get_db() as con:
             for msg in msgs:
-                sender       = msg.get("from", {}).get("emailAddress", {})
-                sent_to      = (sender.get("name") or sender.get("address") or "").strip()
-                subject      = (msg.get("subject") or "").strip()
-                received_raw = msg.get("receivedDateTime", "")
-                # Convert ISO "2026-07-25T14:30:00Z" → "2026-07-25"
+                sender        = msg.get("from", {}).get("emailAddress", {})
+                sent_to       = (sender.get("name") or sender.get("address") or "").strip()
+                subject       = (msg.get("subject") or "").strip()
+                received_raw  = msg.get("receivedDateTime", "")
                 date_received = received_raw[:10] if received_raw else ""
 
+                # Dedup check
                 exists = con.execute(
                     "SELECT id FROM quotes WHERE sent_to=? AND subject=? AND date_received=?",
                     (sent_to, subject, date_received)
@@ -441,21 +542,33 @@ def sync_from_outlook():
                     skipped += 1
                     continue
 
-                con.execute(
-                    "INSERT INTO quotes (date_received, sent_to, subject) VALUES (?,?,?)",
-                    (date_received, sent_to, subject)
-                )
+                # Parse body for pre-populated fields
+                body_content = msg.get("body", {}).get("content", "")
+                content_type = msg.get("body", {}).get("contentType", "text")
+                parsed = _parse_quote_email(subject, body_content, content_type)
+
+                con.execute("""
+                INSERT INTO quotes
+                    (date_received, sent_to, subject, job_name, customer, location,
+                     product, price, quantities, amount, notes)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    date_received, sent_to, subject,
+                    parsed.get('job_name'), parsed.get('customer'), parsed.get('location'),
+                    parsed.get('product'), parsed.get('price'), parsed.get('quantities'),
+                    parsed.get('amount'), parsed.get('notes'),
+                ))
                 inserted += 1
 
-        return {"inserted": inserted, "skipped": skipped,
-                "message": (f"✓ {inserted} new quote{'' if inserted==1 else 's'} imported"
-                            if inserted else "✓ Already up to date")}
+        msg_text = (f"✓ {inserted} new quote{'' if inserted==1 else 's'} imported"
+                    if inserted else "✓ Already up to date")
+        return {"inserted": inserted, "skipped": skipped, "message": msg_text}
 
-    # ── Fallback: sync_pending.json (legacy scheduled-task path) ─────────────
+    # ── Fallback: sync_pending.json (legacy path) ─────────────────────────────
     import json as _json
     pending_path = os.path.join(BASE_DIR, "sync_pending.json")
     if not os.path.exists(pending_path):
-        return {"inserted": 0, "skipped": 0, "message": "No pending quotes"}
+        return {"inserted": 0, "skipped": 0, "message": "Graph API not configured and no pending quotes file"}
 
     with open(pending_path, "r", encoding="utf-8") as f:
         records = _json.load(f)
