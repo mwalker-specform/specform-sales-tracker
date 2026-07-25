@@ -986,34 +986,71 @@ function SalesTab() {
 }
 
 // ── Texas Region Map ─────────────────────────────────────────────────────────
-// Small SVG of Texas with each territory highlighted.
-// Simplified outline (viewBox 0 0 100 115, roughly proportional to the state).
+// Coordinates derived from real Texas border lat/lon data.
+// Transform: x=(106.65-lon)/13.14*100, y=(36.50-lat)/10.66*100  (viewBox 0 0 100 100)
+//
+// Key border points used (clockwise from NW panhandle):
+//   NW panhandle (103°W,36.5°N)→NE panhandle (100°W,36.5°N)→SE panhandle (100°W,34°N)
+//   →Red River/NE TX (94°W,33.5°N)→Sabine Pass (94°W,29.7°N)→Gulf Coast arc
+//   →Brownsville (97.2°W,25.9°N)→Rio Grande west: Rio Grande City→Laredo→Eagle Pass
+//   →Del Rio→Big Bend (102°W,29°N)→Presidio (104.4°W,29.6°N)→El Paso (106.5°W,31.8°N)
+//   →step east to NM border (103°W,31.8°N)→Z closes N along NM border to panhandle
 function TexasMap({region}) {
-  const uid     = 'txc' + (region||'x').replace(/\s/g,'');
-  const outline = "M26,1 L67,1 L67,26 L99,30 L99,68 L91,77 L77,92 L62,104 L49,111 L33,100 L17,82 L1,67 L1,61 L7,47 L26,26 Z";
+  const uid = 'txc' + (region||'x').replace(/\s/g,'');
+  const outline = [
+    "M27,0",               // NW panhandle corner
+    "L51,0",               // NE panhandle corner
+    "L51,23",              // SE panhandle (meets Red River at 100°W)
+    "L96,28",              // NE Texas / Texarkana area
+    "L97,64",              // E Texas / Sabine River south
+    "L91,66",              // Sabine Pass transition
+    "L90,68",              // Galveston area
+    "L86,70",              // Freeport/Brazoria
+    "L82,72",              // Matagorda Bay
+    "L77,74",              // Port Lavaca
+    "L73,80",              // Aransas Pass / Rockport
+    "L70,81",              // Corpus Christi
+    "L71,84",              // Padre Island north
+    "L72,97",              // Port Isabel
+    "L72,99",              // Brownsville / Rio Grande mouth
+    "L60,95",              // Rio Grande City
+    "L54,85",              // Laredo
+    "L47,73",              // Eagle Pass
+    "L44,67",              // Del Rio
+    "L35,70",              // Big Bend (dips south into Mexico)
+    "L17,65",              // Presidio
+    "L1,44",               // El Paso
+    "L27,44",              // Step east to NM/TX border at 103°W
+    "Z"                    // Closes north along NM border back to NW panhandle
+  ].join(" ");
+
+  // Region highlight polygons — clipped to Texas outline
   const hl = {
-    // Central TX: Austin / San Antonio / Waco corridor
-    'Central Texas':   {d:"M22,50 L73,50 L71,88 L52,103 L33,98 L17,81 Z",   fill:"#3b82f6"},
-    // SE TX: Houston / Beaumont / Galveston
-    'Southeast Texas': {d:"M68,40 L99,44 L99,72 L92,79 L77,93 L63,83 Z",    fill:"#f97316"},
-    // The Valley: Rio Grande Valley southern strip
-    'The Valley':      {d:"M17,80 L34,99 L52,110 L49,112 L32,101 L16,82 Z", fill:"#16a34a"},
+    // Central TX: Waco / Austin / San Antonio corridor
+    'Central Texas':   {d:"M42,38 L83,38 L83,88 L52,96 L38,82 L36,67 L33,57 Z",  fill:"#3b82f6"},
+    // SE TX: Houston / Beaumont / Port Arthur / Galveston
+    'Southeast Texas': {d:"M76,45 L100,45 L100,80 L84,85 L74,80 L74,58 Z",        fill:"#f97316"},
+    // The Valley: Rio Grande Valley — Laredo / McAllen / Brownsville strip
+    'The Valley':      {d:"M47,82 L75,82 L75,100 L47,100 Z",                       fill:"#16a34a"},
   };
   const h = hl[region];
   return React.createElement('svg', {
-    viewBox:"0 0 100 115", width:46, height:53,
-    style:{flexShrink:0, filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.35))'}
+    viewBox:"0 0 100 100", width:52, height:52,
+    style:{flexShrink:0, filter:'drop-shadow(0 1px 3px rgba(0,0,0,0.4))'}
   },
     React.createElement('defs', {},
       React.createElement('clipPath', {id:uid},
         React.createElement('path', {d:outline})
       )
     ),
-    React.createElement('path', {d:outline, fill:'#c7d2e8', stroke:'#fff', strokeWidth:2.5}),
+    // Base state fill
+    React.createElement('path', {d:outline, fill:'#b6c5db', stroke:'#fff', strokeWidth:1.5}),
+    // Region highlight (clipped to state shape)
     h && React.createElement('path', {
-      d:h.d, fill:h.fill, fillOpacity:0.85,
+      d:h.d, fill:h.fill, fillOpacity:0.82,
       clipPath:`url(#${uid})`
     }),
+    // Outline on top for crisp edge
     React.createElement('path', {d:outline, fill:'none', stroke:'#fff', strokeWidth:1.5})
   );
 }
