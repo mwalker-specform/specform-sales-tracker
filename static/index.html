@@ -979,6 +979,248 @@ function SalesTab() {
   );
 }
 
+// ── Customer Directory ────────────────────────────────────────────────────────
+function CustomerDirectory() {
+  const [contacts,    setContacts]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [filter,      setFilter]      = useState('All');
+  const [search,      setSearch]      = useState('');
+  const [importing,   setImporting]   = useState(false);
+  const [importMsg,   setImportMsg]   = useState('');
+  const [editingId,   setEditingId]   = useState(null);
+  const [editForm,    setEditForm]    = useState({});
+  const [sigFetching, setSigFetching] = useState(null);
+  const [adding,      setAdding]      = useState(false);
+  const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',notes:''});
+
+  function loadContacts(f, s) {
+    setLoading(true);
+    const pf = f !== undefined ? f : filter;
+    const ps = s !== undefined ? s : search;
+    let url = '/api/contacts?a=1';
+    if (pf && pf !== 'All') url += `&product_line=${encodeURIComponent(pf)}`;
+    if (ps) url += `&search=${encodeURIComponent(ps)}`;
+    apiFetch(url).then(data => { setContacts(data); setLoading(false); }).catch(() => setLoading(false));
+  }
+
+  useEffect(() => { loadContacts(); }, [filter, search]);
+
+  function handleImport() {
+    setImporting(true);
+    apiFetch('/api/contacts/import-from-quotes', {method:'POST'})
+      .then(data => {
+        setImportMsg(`✓ ${data.inserted} new contact${data.inserted===1?'':'s'} imported, ${data.skipped} already existed`);
+        loadContacts();
+      })
+      .catch(() => setImportMsg('❌ Import failed'))
+      .finally(() => { setImporting(false); setTimeout(() => setImportMsg(''), 6000); });
+  }
+
+  function startEdit(c) { setEditingId(c.id); setEditForm({...c}); }
+  function cancelEdit() { setEditingId(null); setEditForm({}); }
+  function saveEdit() {
+    apiFetch(`/api/contacts/${editingId}`, {method:'PUT', body:JSON.stringify(editForm)})
+      .then(() => { cancelEdit(); loadContacts(); });
+  }
+  function deleteContact(id) {
+    if (!confirm('Delete this contact?')) return;
+    apiFetch(`/api/contacts/${id}`, {method:'DELETE'}).then(() => loadContacts());
+  }
+  function fetchSig(email, id) {
+    setSigFetching(email);
+    apiFetch(`/api/contacts/fetch-signature/${encodeURIComponent(email)}`)
+      .then(data => {
+        if (data.found) {
+          const c = contacts.find(x => x.id === id) || {};
+          startEdit({...c, id,
+            name:  data.name  || c.name  || '',
+            phone: data.phone || c.phone || '',
+            notes: c.notes || (data.signature_text ? data.signature_text.slice(0,300) : ''),
+          });
+        } else {
+          alert('No signature found: ' + (data.reason || 'unknown'));
+        }
+      })
+      .catch(() => alert('Error fetching signature'))
+      .finally(() => setSigFetching(null));
+  }
+  function saveNew() {
+    apiFetch('/api/contacts', {method:'POST', body:JSON.stringify(newForm)})
+      .then(() => {
+        setAdding(false);
+        setNewForm({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',notes:''});
+        loadContacts();
+      })
+      .catch(() => alert('Could not save — check that the email address is unique'));
+  }
+
+  const plColor = pl => pl==='RMAX'?'#1d4ed8' : pl==='Hydrotech'?'#16a34a' : '#7c3aed';
+
+  const grouped = {};
+  contacts.forEach(c => {
+    const loc = (c.location||'').trim() || '(No Location)';
+    if (!grouped[loc]) grouped[loc] = [];
+    grouped[loc].push(c);
+  });
+  const locKeys = Object.keys(grouped).sort((a,b) =>
+    a==='(No Location)' ? 1 : b==='(No Location)' ? -1 : a.localeCompare(b)
+  );
+
+  function editRow(label, key, type) {
+    return React.createElement('div', {key},
+      React.createElement('label', {className:'block text-xs text-gray-400 mb-0.5'}, label),
+      type==='select'
+        ? React.createElement('select', {value:editForm[key]||'RMAX', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1 text-sm'},
+            ['RMAX','Hydrotech','Both'].map(v=>React.createElement('option',{key:v,value:v},v))
+          )
+        : type==='textarea'
+        ? React.createElement('textarea', {value:editForm[key]||'', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), rows:2, className:'w-full border rounded px-2 py-1 text-sm resize-none'})
+        : React.createElement('input', {type:'text', value:editForm[key]||'', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1 text-sm'})
+    );
+  }
+
+  function newRow(label, key, type) {
+    return React.createElement('div', {key},
+      React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, label),
+      type==='select'
+        ? React.createElement('select', {value:newForm[key]||'RMAX', onChange:e=>setNewForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1.5 text-sm'},
+            ['RMAX','Hydrotech','Both'].map(v=>React.createElement('option',{key:v,value:v},v))
+          )
+        : React.createElement('input', {type:'text', value:newForm[key]||'', placeholder:label, onChange:e=>setNewForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1.5 text-sm'})
+    );
+  }
+
+  return React.createElement('div', {},
+    // ── Toolbar ──
+    React.createElement('div', {className:'flex flex-wrap gap-3 items-center mb-5'},
+      React.createElement('div', {className:'flex gap-1'},
+        ['All','RMAX','Hydrotech'].map(f =>
+          React.createElement('button', {
+            key:f, onClick:()=>setFilter(f),
+            className:'px-3 py-1.5 rounded text-sm font-medium border transition-colors',
+            style: filter===f
+              ? {background:f==='RMAX'?'#1d4ed8':f==='Hydrotech'?'#16a34a':'#374151', color:'#fff', borderColor:'transparent'}
+              : {background:'#fff', color:'#374151', borderColor:'#d1d5db'}
+          }, f)
+        )
+      ),
+      React.createElement('input', {
+        type:'text', value:search, placeholder:'🔍 Search contacts…',
+        onChange:e=>setSearch(e.target.value),
+        className:'border rounded px-3 py-1.5 text-sm flex-1 min-w-[180px]'
+      }),
+      React.createElement('button', {
+        onClick:handleImport, disabled:importing,
+        className:'px-3 py-1.5 rounded text-sm font-medium border bg-white hover:bg-gray-50',
+        style:{borderColor:'#d1d5db'}
+      }, importing ? '⏳ Importing…' : '⬇ Import from Quotes'),
+      React.createElement('button', {
+        onClick:()=>setAdding(true),
+        className:'px-3 py-1.5 rounded text-sm font-medium text-white',
+        style:{background:'#1d4ed8'}
+      }, '+ Add Contact')
+    ),
+
+    // ── Import message ──
+    importMsg && React.createElement('div', {className:'mb-4 px-4 py-2 bg-green-50 border border-green-200 rounded text-sm text-green-800'}, importMsg),
+
+    // ── New contact form ──
+    adding && React.createElement('div', {className:'mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl'},
+      React.createElement('div', {className:'font-semibold text-blue-900 mb-3'}, 'New Contact'),
+      React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3'},
+        newRow('Name','name'), newRow('Company','company'), newRow('Phone','phone'),
+        newRow('Email','email'), newRow('Location','location'), newRow('Product Line','product_line','select')
+      ),
+      React.createElement('div', {className:'flex gap-2'},
+        React.createElement('button', {onClick:saveNew, className:'px-4 py-1.5 rounded text-sm font-medium text-white', style:{background:'#1d4ed8'}}, 'Save'),
+        React.createElement('button', {onClick:()=>setAdding(false), className:'px-4 py-1.5 rounded text-sm font-medium bg-white border'}, 'Cancel')
+      )
+    ),
+
+    // ── Content ──
+    loading
+      ? React.createElement('div', {className:'text-center py-16 text-gray-400'}, 'Loading contacts…')
+    : contacts.length===0
+      ? React.createElement('div', {className:'text-center py-20'},
+          React.createElement('div', {className:'text-5xl mb-3'}, '👥'),
+          React.createElement('p', {className:'text-gray-500 mb-2'}, 'No contacts yet.'),
+          React.createElement('p', {className:'text-sm text-gray-400'}, 'Click "⬇ Import from Quotes" to pull contacts from existing quotes, or "+ Add Contact" to add manually.')
+        )
+    : locKeys.map(loc =>
+        React.createElement('div', {key:loc, className:'mb-8'},
+          React.createElement('div', {className:'flex items-center gap-3 mb-3'},
+            React.createElement('span', {className:'font-semibold text-gray-700'}, '📍 '+loc),
+            React.createElement('div', {className:'flex-1 h-px bg-gray-200'}),
+            React.createElement('span', {className:'text-xs text-gray-400'}, grouped[loc].length+' contact'+(grouped[loc].length!==1?'s':''))
+          ),
+          React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'},
+            grouped[loc].map(c => {
+              const isEditing = editingId===c.id;
+              return React.createElement('div', {
+                key:c.id,
+                className:'bg-white rounded-xl border shadow-sm p-4 '+(isEditing?'ring-2 ring-blue-400':'hover:shadow-md')
+              },
+                // Badge + actions
+                React.createElement('div', {className:'flex items-center justify-between mb-3'},
+                  React.createElement('span', {
+                    className:'text-xs font-semibold px-2 py-0.5 rounded-full text-white',
+                    style:{background:plColor(isEditing?editForm.product_line:c.product_line)}
+                  }, isEditing?(editForm.product_line||'RMAX'):(c.product_line||'—')),
+                  !isEditing && React.createElement('div', {className:'flex gap-1'},
+                    React.createElement('button', {
+                      title:'Fetch contact info from email signature',
+                      onClick:()=>c.email&&fetchSig(c.email,c.id),
+                      disabled:sigFetching===c.email||!c.email,
+                      className:'text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded text-xs border border-transparent hover:border-blue-200'
+                    }, sigFetching===c.email?'⏳':'✉'),
+                    React.createElement('button', {
+                      title:'Edit contact', onClick:()=>startEdit(c),
+                      className:'text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded text-xs border border-transparent hover:border-blue-200'
+                    }, '✏️'),
+                    React.createElement('button', {
+                      title:'Delete contact', onClick:()=>deleteContact(c.id),
+                      className:'text-gray-400 hover:text-red-500 px-1.5 py-0.5 rounded text-xs border border-transparent hover:border-red-200'
+                    }, '🗑')
+                  )
+                ),
+                // Card body
+                isEditing
+                ? React.createElement('div', {},
+                    React.createElement('div', {className:'grid grid-cols-1 gap-2 mb-3'},
+                      editRow('Name','name'), editRow('Company','company'), editRow('Phone','phone'),
+                      editRow('Email','email'), editRow('Location','location'),
+                      editRow('Product Line','product_line','select'), editRow('Notes','notes','textarea')
+                    ),
+                    React.createElement('div', {className:'flex gap-2'},
+                      React.createElement('button', {onClick:saveEdit, className:'flex-1 py-1.5 rounded text-sm font-medium text-white', style:{background:'#1d4ed8'}}, 'Save'),
+                      React.createElement('button', {onClick:cancelEdit, className:'flex-1 py-1.5 rounded text-sm font-medium bg-gray-100 text-gray-700'}, 'Cancel')
+                    )
+                  )
+                : React.createElement('div', {},
+                    React.createElement('div', {className:'font-semibold text-gray-900 text-base mb-0.5 truncate'},
+                      c.name||React.createElement('span',{className:'text-gray-400 italic text-sm'},'No name — click ✏️')
+                    ),
+                    c.company&&React.createElement('div',{className:'text-sm text-gray-600 mb-1 truncate'},c.company),
+                    React.createElement('div', {className:'mt-2 space-y-1.5'},
+                      c.email&&React.createElement('div',{className:'flex items-center gap-2 text-sm'},
+                        React.createElement('span',{className:'text-gray-400 text-xs'},'✉'),
+                        React.createElement('a',{href:`mailto:${c.email}`,className:'text-blue-600 hover:underline truncate'},c.email)
+                      ),
+                      c.phone&&React.createElement('div',{className:'flex items-center gap-2 text-sm'},
+                        React.createElement('span',{className:'text-gray-400 text-xs'},'📞'),
+                        React.createElement('a',{href:`tel:${c.phone}`,className:'text-gray-700 hover:text-blue-600'},c.phone)
+                      ),
+                      c.notes&&React.createElement('div',{className:'text-xs text-gray-400 mt-1.5 italic line-clamp-2'},c.notes)
+                    )
+                  )
+              );
+            })
+          )
+        )
+      )
+  );
+}
+
 // ── App shell ─────────────────────────────────────────────────────────────────
 function App() {
   const [tab, setTab]         = useState('quotes');
@@ -1048,6 +1290,11 @@ function App() {
           onClick:()=>setTab('hydrotech')
         }, '💧 Hydrotech Quotes'),
         React.createElement('button', {
+          className:`tab ${tab==='directory'?'tab-active':'tab-inactive'}`,
+          style: tab==='directory' ? {background:'#7c3aed'} : {},
+          onClick:()=>setTab('directory')
+        }, '👥 Customer Directory'),
+        React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           onClick:()=>setTab('sales')
         }, '📈 SPECFORM Overall Sales')
@@ -1057,7 +1304,8 @@ function App() {
     // Content
     React.createElement('main', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-6'},
       tab === 'dashboard' ? React.createElement(Dashboard, {key:refresh})
-      : tab === 'sales'   ? React.createElement(SalesTab)
+      : tab === 'sales'      ? React.createElement(SalesTab)
+      : tab === 'directory'  ? React.createElement(CustomerDirectory, {key:'dir'})
       : tab === 'hydrotech' ? React.createElement(QuoteList, {
           key: 'hydrotech-' + refresh,
           refresh,
