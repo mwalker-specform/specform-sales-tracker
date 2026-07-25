@@ -10,6 +10,7 @@
 <script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   body { font-family: 'Segoe UI', system-ui, sans-serif; background:#f1f5f9; }
   .status-Won       { background:#dcfce7; color:#166534; }
@@ -1295,7 +1296,32 @@ function CustomerDirectory() {
         onClick:()=>setAdding(true),
         className:'px-3 py-1.5 rounded-lg text-sm font-medium text-white whitespace-nowrap',
         style:{background:'#1d4ed8'}
-      }, '+ Add Contact')
+      }, '+ Add Contact'),
+      React.createElement('button', {
+        onClick: () => {
+          const rows = contacts.map(c => ({
+            'Name':          c.name        || '',
+            'Company':       c.company     || '',
+            'Customer Type': c.customer_type || '',
+            'Product Line':  c.product_line  || '',
+            'City':          c.location    || '',
+            'Phone':         c.phone       || '',
+            'Email':         c.email       || '',
+            'Notes':         c.notes       || '',
+          }));
+          const ws = XLSX.utils.json_to_sheet(rows);
+          // Column widths
+          ws['!cols'] = [
+            {wch:22},{wch:28},{wch:22},{wch:14},{wch:18},{wch:16},{wch:32},{wch:40}
+          ];
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, 'Customer Directory');
+          const today = new Date().toISOString().slice(0,10);
+          XLSX.writeFile(wb, `Customer_Directory_${today}.xlsx`);
+        },
+        className:'px-3 py-1.5 rounded-lg text-sm font-medium border bg-white hover:bg-gray-50 whitespace-nowrap',
+        style:{borderColor:'#d1d5db'}
+      }, '⬇ Export to Excel')
     ),
 
     // ── Import message ──
