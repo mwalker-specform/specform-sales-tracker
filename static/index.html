@@ -1484,7 +1484,14 @@ function App() {
             React.createElement('div', {className:'text-base sm:text-lg font-bold tracking-tight leading-none'}, 'SPECFORM Sales Tracker')
           )
         ),
-        null
+        // Customer Directory button — far right of blue header
+        React.createElement('button', {
+          onClick: () => setTab('directory'),
+          className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+          style: tab === 'directory'
+            ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
+            : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
+        }, '👥 Customer Directory')
       )
     ),
 
@@ -1505,11 +1512,6 @@ function App() {
           style: tab==='hydrotech' ? {background:'#16a34a'} : {},
           onClick:()=>setTab('hydrotech')
         }, '💧 Hydrotech Quotes'),
-        React.createElement('button', {
-          className:`tab ${tab==='directory'?'tab-active':'tab-inactive'}`,
-          style: tab==='directory' ? {background:'#7c3aed'} : {},
-          onClick:()=>setTab('directory')
-        }, '👥 Customer Directory'),
         React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           onClick:()=>setTab('sales')
