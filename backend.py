@@ -100,6 +100,7 @@ app.add_middleware(
 @app.on_event("startup")
 def startup():
     init_db()
+    init_hydrotech_db()
 
 # ── Quote endpoints ───────────────────────────────────────────────────────────
 @app.get("/api/quotes")
@@ -678,6 +679,292 @@ def list_sheets():
         return {"sheets": list(wb.sheetnames)}
     except Exception as e:
         raise HTTPException(500, str(e))
+
+# ── Hydrotech Quotes ─────────────────────────────────────────────────────────
+
+def init_hydrotech_db():
+    with get_db() as con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS hydrotech_quotes (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            status             TEXT,
+            date_received      TEXT,
+            date_quoted        TEXT,
+            sent_to            TEXT,
+            subject            TEXT,
+            job_name           TEXT,
+            customer           TEXT,
+            location           TEXT,
+            product            TEXT,
+            price              TEXT,
+            quantities         TEXT,
+            amount             REAL,
+            close_date         TEXT,
+            est_freight        TEXT,
+            lead_time          TEXT,
+            notes              TEXT,
+            add_to_salesforce  INTEGER DEFAULT 0,
+            completed          INTEGER DEFAULT 0,
+            created_at         TEXT DEFAULT (datetime('now')),
+            updated_at         TEXT DEFAULT (datetime('now'))
+        )""")
+        for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
+                                 ('completed',         'INTEGER DEFAULT 0')]:
+            try:
+                con.execute(f"ALTER TABLE hydrotech_quotes ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
+
+@app.get("/api/hydrotech-quotes")
+def list_hydrotech_quotes(
+    status:   Optional[str] = Query(None),
+    location: Optional[str] = Query(None),
+    search:   Optional[str] = Query(None),
+):
+    with get_db() as con:
+        sql = "SELECT * FROM hydrotech_quotes WHERE 1=1"
+        params = []
+        if status and status != "All":
+            sql += " AND status = ?"
+            params.append(status)
+        if location and location != "All":
+            sql += " AND location = ?"
+            params.append(location)
+        if search:
+            sql += " AND (subject LIKE ? OR sent_to LIKE ? OR job_name LIKE ? OR customer LIKE ? OR location LIKE ?)"
+            s = f"%{search}%"
+            params += [s, s, s, s, s]
+        sql += " ORDER BY date_received DESC"
+        rows = con.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+@app.get("/api/hydrotech-quotes/{quote_id}")
+def get_hydrotech_quote(quote_id: int):
+    with get_db() as con:
+        row = con.execute("SELECT * FROM hydrotech_quotes WHERE id=?", (quote_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Hydrotech quote not found")
+        return dict(row)
+
+@app.post("/api/hydrotech-quotes", status_code=201)
+def create_hydrotech_quote(q: QuoteIn):
+    with get_db() as con:
+        cur = con.execute("""
+        INSERT INTO hydrotech_quotes (status,date_received,date_quoted,sent_to,subject,job_name,
+            customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
+            add_to_salesforce,completed)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (q.status,q.date_received,q.date_quoted,q.sent_to,q.subject,q.job_name,
+              q.customer,q.location,q.product,q.price,q.quantities,q.amount,
+              q.close_date,q.est_freight,q.lead_time,q.notes,
+              q.add_to_salesforce,q.completed))
+        return {"id": cur.lastrowid}
+
+@app.put("/api/hydrotech-quotes/{quote_id}")
+def update_hydrotech_quote(quote_id: int, q: QuoteIn):
+    with get_db() as con:
+        existing = con.execute("SELECT id FROM hydrotech_quotes WHERE id=?", (quote_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "Hydrotech quote not found")
+        con.execute("""
+        UPDATE hydrotech_quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
+            job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
+            close_date=?,est_freight=?,lead_time=?,notes=?,
+            add_to_salesforce=?,completed=?,updated_at=datetime('now')
+        WHERE id=?
+        """, (q.status,q.date_received,q.date_quoted,q.sent_to,q.subject,q.job_name,
+              q.customer,q.location,q.product,q.price,q.quantities,q.amount,
+              q.close_date,q.est_freight,q.lead_time,q.notes,
+              q.add_to_salesforce,q.completed,quote_id))
+        return {"ok": True}
+
+@app.delete("/api/hydrotech-quotes/{quote_id}")
+def delete_hydrotech_quote(quote_id: int):
+    with get_db() as con:
+        con.execute("DELETE FROM hydrotech_quotes WHERE id=?", (quote_id,))
+        return {"ok": True}
+
+@app.get("/api/hydrotech-quotes-export")
+def export_hydrotech_quotes():
+    """Export all Hydrotech quotes to a formatted Excel file."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from fastapi.responses import StreamingResponse
+
+    with get_db() as con:
+        rows = con.execute("""
+            SELECT id, status, date_received, date_quoted, sent_to, subject,
+                   job_name, customer, location, product, price, quantities,
+                   amount, close_date, est_freight, lead_time, notes,
+                   add_to_salesforce, completed
+            FROM hydrotech_quotes ORDER BY date_received DESC
+        """).fetchall()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Hydrotech Quotes"
+
+    header_font  = Font(name='Calibri', bold=True, color='FFFFFF', size=11)
+    header_fill  = PatternFill('solid', fgColor='166534')   # dark green for Hydrotech
+    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    border_side  = Side(style='thin', color='BFBFBF')
+    cell_border  = Border(left=border_side, right=border_side,
+                          top=border_side, bottom=border_side)
+    zebra_fill   = PatternFill('solid', fgColor='DCFCE7')
+    STATUS_FILLS = {
+        'Won':    PatternFill('solid', fgColor='D9EAD3'),
+        'Lost':   PatternFill('solid', fgColor='F4CCCC'),
+        'Verbal': PatternFill('solid', fgColor='FFF2CC'),
+    }
+
+    headers = [
+        ('ID', 8), ('Status', 12), ('Date Received', 14), ('Date Quoted', 14),
+        ('Sent To', 22), ('Subject', 30), ('Job Name', 28), ('Customer', 22),
+        ('Location', 18), ('Product', 16), ('Price', 12), ('Quantities', 14),
+        ('Amount', 14), ('Close Date', 14), ('Est. Freight', 14), ('Lead Time', 14),
+        ('Notes', 35), ('Salesforce', 12), ('Completed', 12),
+    ]
+    ws.row_dimensions[1].height = 30
+    for col_idx, (label, width) in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=label)
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = header_align
+        cell.border    = cell_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    ws.freeze_panes = 'A2'
+
+    for row_idx, q in enumerate(rows, start=2):
+        status   = q['status'] or ''
+        row_fill = STATUS_FILLS.get(status, (zebra_fill if row_idx % 2 == 0 else None))
+        values = [
+            q['id'], q['status'], q['date_received'], q['date_quoted'],
+            q['sent_to'], q['subject'], q['job_name'], q['customer'],
+            q['location'], q['product'], q['price'], q['quantities'],
+            q['amount'], q['close_date'], q['est_freight'], q['lead_time'],
+            q['notes'],
+            'Yes' if q['add_to_salesforce'] else '',
+            'Yes' if q['completed'] else '',
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border    = cell_border
+            cell.alignment = Alignment(vertical='top', wrap_text=(col_idx in (6, 7, 17)))
+            if row_fill:
+                cell.fill = row_fill
+            if col_idx == 13 and value is not None:
+                cell.number_format = '$#,##0.00'
+            if col_idx in (1, 2, 18, 19):
+                cell.alignment = Alignment(horizontal='center', vertical='top')
+
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"Hydrotech_Quotes_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+@app.post("/api/hydrotech-sync")
+def hydrotech_sync():
+    """Read hydrotech_sync_pending.json and insert new Hydrotech quotes."""
+    import json as _json
+    pending_path = os.path.join(BASE_DIR, "hydrotech_sync_pending.json")
+    if not os.path.exists(pending_path):
+        return {"inserted": 0, "skipped": 0, "message": "No pending Hydrotech quotes"}
+
+    with open(pending_path, "r", encoding="utf-8") as f:
+        records = _json.load(f)
+
+    inserted = skipped = 0
+    with get_db() as con:
+        for r in records:
+            exists = con.execute(
+                "SELECT id FROM hydrotech_quotes WHERE sent_to=? AND subject=? AND date_received=?",
+                (r.get("sent_to"), r.get("subject"), r.get("date_received"))
+            ).fetchone()
+            if exists:
+                skipped += 1
+                continue
+            con.execute("""
+            INSERT INTO hydrotech_quotes
+                (status, date_received, date_quoted, sent_to, subject, job_name,
+                 customer, location, product, price, quantities, amount,
+                 close_date, est_freight, lead_time, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                r.get("status"), r.get("date_received"), r.get("date_quoted"),
+                r.get("sent_to"), r.get("subject"), r.get("job_name"),
+                r.get("customer"), r.get("location"), r.get("product"),
+                r.get("price"), r.get("quantities"), r.get("amount"),
+                r.get("close_date"), r.get("est_freight"), r.get("lead_time"),
+                r.get("notes"),
+            ))
+            inserted += 1
+
+    with open(pending_path, "w", encoding="utf-8") as f:
+        _json.dump([], f)
+
+    return {"inserted": inserted, "skipped": skipped,
+            "message": f"Imported {inserted} new Hydrotech quote(s), {skipped} duplicate(s) skipped"}
+
+@app.get("/api/hydrotech-dashboard")
+def hydrotech_dashboard():
+    with get_db() as con:
+        totals = con.execute("""
+            SELECT
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total_amount,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won_amount,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal_amount,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost_amount
+            FROM hydrotech_quotes
+        """).fetchone()
+        by_loc = con.execute("""
+            SELECT location,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
+            FROM hydrotech_quotes WHERE location IS NOT NULL
+            GROUP BY location ORDER BY total DESC
+        """).fetchall()
+        by_month = con.execute("""
+            SELECT substr(date_received,1,7) as month,
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count
+            FROM hydrotech_quotes
+            WHERE date_received IS NOT NULL AND date_received != ''
+              AND substr(date_received,1,7) >= substr(date('now','-11 months'),1,7)
+            GROUP BY month ORDER BY month
+        """).fetchall()
+        by_status = con.execute("""
+            SELECT status, COUNT(*) as count, COALESCE(SUM(amount),0) as amount
+            FROM hydrotech_quotes WHERE status IS NOT NULL
+            GROUP BY status ORDER BY amount DESC
+        """).fetchall()
+        locations = [r[0] for r in con.execute(
+            "SELECT DISTINCT location FROM hydrotech_quotes WHERE location IS NOT NULL ORDER BY location"
+        ).fetchall()]
+        return {
+            "totals": dict(totals),
+            "by_location": [dict(r) for r in by_loc],
+            "by_month": [dict(r) for r in by_month],
+            "by_status": [dict(r) for r in by_status],
+            "locations": locations,
+        }
 
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
