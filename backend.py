@@ -411,7 +411,7 @@ def _parse_quote_email(subject: str, body_html: str, content_type: str) -> dict:
     # Fallback: derive job name from subject if body label missing
     if not job and subject:
         job = _sync_re.sub(
-            r'^(re:|fw:|fwd:|rmax\s+quotes?\s*[-–:]\s*)+',
+            r'^(re:|fw:|fwd:|(?:rmax|hydrotech)\s+quotes?\s*[-–:]\s*)+',
             '', subject, flags=_sync_re.IGNORECASE
         ).strip()
 
@@ -1191,46 +1191,115 @@ def export_hydrotech_quotes():
 
 @app.post("/api/hydrotech-sync")
 def hydrotech_sync():
-    """Read hydrotech_sync_pending.json and insert new Hydrotech quotes."""
-    import json as _json
-    pending_path = os.path.join(BASE_DIR, "hydrotech_sync_pending.json")
-    if not os.path.exists(pending_path):
-        return {"inserted": 0, "skipped": 0, "message": "No pending Hydrotech quotes"}
+    """
+    Pull new emails from the 'Hydrotech Quotes' Outlook folder via Graph API,
+    parse each email body to pre-populate quote fields, and insert any
+    that are not already in the database.
+    """
+    if not GRAPH_CLIENT_SECRET:
+        return {"inserted": 0, "skipped": 0, "message": "Graph API not configured"}
 
-    with open(pending_path, "r", encoding="utf-8") as f:
-        records = _json.load(f)
+    try:
+        import requests as _req
+    except ImportError:
+        return {"inserted": 0, "skipped": 0, "message": "requests package not installed"}
 
-    inserted = skipped = 0
+    try:
+        token = _get_graph_token()
+    except Exception as e:
+        return {"inserted": 0, "skipped": 0, "message": f"Auth failed: {e}"}
+
+    hdrs = {"Authorization": f"Bearer {token}"}
+
+    # ── Find "Hydrotech Quotes" folder ───────────────────────────────────────
+    folder_id = None
+    for list_url in [
+        f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders?$select=id,displayName&$top=100",
+        f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/Inbox/childFolders?$select=id,displayName&$top=100",
+    ]:
+        try:
+            r = _req.get(list_url, headers=hdrs, timeout=20)
+            if r.status_code == 200:
+                for f in r.json().get("value", []):
+                    if (f.get("displayName") or "").strip().lower() == "hydrotech quotes":
+                        folder_id = f["id"]
+                        break
+            if folder_id:
+                break
+        except Exception:
+            pass
+
+    if not folder_id:
+        return {"inserted": 0, "skipped": 0,
+                "message": "Could not find 'Hydrotech Quotes' folder in Outlook — check folder name"}
+
+    # ── Fetch messages with body ──────────────────────────────────────────────
+    msgs = []
+    next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                f"/mailFolders/{folder_id}/messages"
+                f"?$select=from,toRecipients,subject,receivedDateTime,body&$top=50")
+    while next_url and len(msgs) < 200:
+        try:
+            r = _req.get(next_url, headers=hdrs, timeout=30)
+            if r.status_code != 200:
+                return {"inserted": 0, "skipped": 0,
+                        "message": f"Graph API error {r.status_code}: {r.text[:200]}"}
+            data = r.json()
+            msgs.extend(data.get("value", []))
+            next_url = data.get("@odata.nextLink")
+        except Exception as e:
+            return {"inserted": 0, "skipped": 0, "message": f"Fetch error: {e}"}
+
+    # ── Insert / update quotes ────────────────────────────────────────────────
+    inserted = updated = skipped = 0
     with get_db() as con:
-        for r in records:
+        for msg in msgs:
+            to_recipients = msg.get("toRecipients", [])
+            if to_recipients:
+                first_to = to_recipients[0].get("emailAddress", {})
+                sent_to  = (first_to.get("name") or first_to.get("address") or "").strip()
+            else:
+                sent_to  = ""
+
+            subject       = (msg.get("subject") or "").strip()
+            received_raw  = msg.get("receivedDateTime", "")
+            date_received = received_raw[:10] if received_raw else ""
+
             exists = con.execute(
-                "SELECT id FROM hydrotech_quotes WHERE sent_to=? AND subject=? AND date_received=?",
-                (r.get("sent_to"), r.get("subject"), r.get("date_received"))
+                "SELECT id, sent_to FROM hydrotech_quotes WHERE subject=? AND date_received=?",
+                (subject, date_received)
             ).fetchone()
             if exists:
-                skipped += 1
+                if sent_to and exists["sent_to"] != sent_to:
+                    con.execute("UPDATE hydrotech_quotes SET sent_to=? WHERE id=?",
+                                (sent_to, exists["id"]))
+                    updated += 1
+                else:
+                    skipped += 1
                 continue
+
+            body_content = msg.get("body", {}).get("content", "")
+            content_type = msg.get("body", {}).get("contentType", "text")
+            parsed = _parse_quote_email(subject, body_content, content_type)
+
             con.execute("""
             INSERT INTO hydrotech_quotes
-                (status, date_received, date_quoted, sent_to, subject, job_name,
-                 customer, location, product, price, quantities, amount,
-                 close_date, est_freight, lead_time, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                (date_received, sent_to, subject, job_name, customer, location,
+                 product, price, quantities, amount, est_freight, lead_time)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
-                r.get("status"), r.get("date_received"), r.get("date_quoted"),
-                r.get("sent_to"), r.get("subject"), r.get("job_name"),
-                r.get("customer"), r.get("location"), r.get("product"),
-                r.get("price"), r.get("quantities"), r.get("amount"),
-                r.get("close_date"), r.get("est_freight"), r.get("lead_time"),
-                r.get("notes"),
+                date_received, sent_to, subject,
+                parsed.get('job_name'), parsed.get('customer'), parsed.get('location'),
+                parsed.get('product'), parsed.get('price'), parsed.get('quantities'),
+                parsed.get('amount'), parsed.get('est_freight'), parsed.get('lead_time'),
             ))
             inserted += 1
 
-    with open(pending_path, "w", encoding="utf-8") as f:
-        _json.dump([], f)
-
-    return {"inserted": inserted, "skipped": skipped,
-            "message": f"Imported {inserted} new Hydrotech quote(s), {skipped} duplicate(s) skipped"}
+    parts = []
+    if inserted: parts.append(f"{inserted} new quote{'' if inserted==1 else 's'} imported")
+    if updated:  parts.append(f"{updated} updated")
+    msg_text = "✓ " + ", ".join(parts) if parts else "✓ Already up to date"
+    return {"inserted": inserted, "skipped": skipped, "message": msg_text}
 
 @app.get("/api/hydrotech-dashboard")
 def hydrotech_dashboard():
