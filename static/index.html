@@ -251,6 +251,7 @@ function Dashboard() {
   });
   const projData = allMonths.map(m => ({
     ...m,
+    total:  monthMap[m.month] ? (monthMap[m.month].total  || 0) : 0,
     won:    monthMap[m.month] ? (monthMap[m.month].won    || 0) : 0,
     verbal: monthMap[m.month] ? (monthMap[m.month].verbal || 0) : 0,
     isFuture: m.month > currentYM,
