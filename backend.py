@@ -361,13 +361,97 @@ def export_quotes():
         headers={'Content-Disposition': f'attachment; filename="{filename}"'}
     )
 
-# ── Sync endpoint (imports sync_pending.json written by the scheduled task) ───
+# ── Sync endpoint — pulls directly from Outlook "RMAX Quotes" folder ──────────
 @app.post("/api/sync")
 def sync_from_outlook():
     """
-    Read sync_pending.json (written by the Outlook scheduled task), insert any
-    new quotes, then clear the file.  Returns counts so the UI can show feedback.
+    Pull new emails from the 'RMAX Quotes' Outlook folder via Graph API and
+    create quote records for any that aren't already in the database.
+    Falls back to sync_pending.json if Graph is not configured.
     """
+    import json as _json
+
+    # ── Primary path: Graph API ───────────────────────────────────────────────
+    if GRAPH_CLIENT_SECRET:
+        try:
+            import requests as _req
+        except ImportError:
+            return {"inserted": 0, "skipped": 0, "message": "requests package not installed"}
+        try:
+            token = _get_graph_token()
+        except Exception as e:
+            return {"inserted": 0, "skipped": 0, "message": f"Auth failed: {e}"}
+
+        hdrs = {"Authorization": f"Bearer {token}"}
+
+        # Find the "RMAX Quotes" mail folder (top-level or Inbox child)
+        folder_id = None
+        for url in [
+            f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders"
+            f"?$filter=displayName eq 'RMAX Quotes'&$select=id",
+            f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/Inbox/childFolders"
+            f"?$filter=displayName eq 'RMAX Quotes'&$select=id",
+        ]:
+            try:
+                r = _req.get(url, headers=hdrs, timeout=20)
+                if r.status_code == 200:
+                    vals = r.json().get("value", [])
+                    if vals:
+                        folder_id = vals[0]["id"]
+                        break
+            except Exception:
+                pass
+
+        if not folder_id:
+            return {"inserted": 0, "skipped": 0,
+                    "message": "Could not find 'RMAX Quotes' folder in Outlook"}
+
+        # Fetch up to 250 most-recent messages (dedup handles repeats)
+        msgs = []
+        next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                    f"/mailFolders/{folder_id}/messages"
+                    f"?$select=from,subject,receivedDateTime"
+                    f"&$orderby=receivedDateTime desc&$top=100")
+        while next_url and len(msgs) < 250:
+            try:
+                r = _req.get(next_url, headers=hdrs, timeout=30)
+                if r.status_code != 200:
+                    break
+                data = r.json()
+                msgs.extend(data.get("value", []))
+                next_url = data.get("@odata.nextLink")
+            except Exception:
+                break
+
+        inserted = skipped = 0
+        with get_db() as con:
+            for msg in msgs:
+                sender       = msg.get("from", {}).get("emailAddress", {})
+                sent_to      = (sender.get("name") or sender.get("address") or "").strip()
+                subject      = (msg.get("subject") or "").strip()
+                received_raw = msg.get("receivedDateTime", "")
+                # Convert ISO "2026-07-25T14:30:00Z" → "2026-07-25"
+                date_received = received_raw[:10] if received_raw else ""
+
+                exists = con.execute(
+                    "SELECT id FROM quotes WHERE sent_to=? AND subject=? AND date_received=?",
+                    (sent_to, subject, date_received)
+                ).fetchone()
+                if exists:
+                    skipped += 1
+                    continue
+
+                con.execute(
+                    "INSERT INTO quotes (date_received, sent_to, subject) VALUES (?,?,?)",
+                    (date_received, sent_to, subject)
+                )
+                inserted += 1
+
+        return {"inserted": inserted, "skipped": skipped,
+                "message": (f"✓ {inserted} new quote{'' if inserted==1 else 's'} imported"
+                            if inserted else "✓ Already up to date")}
+
+    # ── Fallback: sync_pending.json (legacy scheduled-task path) ─────────────
     import json as _json
     pending_path = os.path.join(BASE_DIR, "sync_pending.json")
     if not os.path.exists(pending_path):
@@ -402,7 +486,6 @@ def sync_from_outlook():
             ))
             inserted += 1
 
-    # Clear the file after successful import
     with open(pending_path, "w", encoding="utf-8") as f:
         _json.dump([], f)
 
