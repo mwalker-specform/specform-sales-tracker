@@ -992,7 +992,8 @@ function CustomerDirectory() {
   const [editForm,    setEditForm]    = useState({});
   const [sigFetching, setSigFetching] = useState(null);
   const [adding,      setAdding]      = useState(false);
-  const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',notes:''});
+  const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',notes:''});
+  const CUSTOMER_TYPES = ['','Contractor','Distributor','General Contractor','Architect'];
 
   function loadContacts(f, s) {
     setLoading(true);
@@ -1065,7 +1066,7 @@ function CustomerDirectory() {
     apiFetch('/api/contacts', {method:'POST', body:JSON.stringify(newForm)})
       .then(() => {
         setAdding(false);
-        setNewForm({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',notes:''});
+        setNewForm({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',notes:''});
         loadContacts();
       })
       .catch(() => alert('Could not save — check that the email address is unique'));
@@ -1090,6 +1091,10 @@ function CustomerDirectory() {
         ? React.createElement('select', {value:editForm[key]||'RMAX', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1 text-sm'},
             ['RMAX','Hydrotech','Both'].map(v=>React.createElement('option',{key:v,value:v},v))
           )
+        : type==='ctype'
+        ? React.createElement('select', {value:editForm[key]||'', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1 text-sm'},
+            CUSTOMER_TYPES.map(v=>React.createElement('option',{key:v||'blank',value:v},v||'— Select type —'))
+          )
         : type==='textarea'
         ? React.createElement('textarea', {value:editForm[key]||'', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), rows:2, className:'w-full border rounded px-2 py-1 text-sm resize-none'})
         : React.createElement('input', {type:'text', value:editForm[key]||'', onChange:e=>setEditForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1 text-sm'})
@@ -1102,6 +1107,10 @@ function CustomerDirectory() {
       type==='select'
         ? React.createElement('select', {value:newForm[key]||'RMAX', onChange:e=>setNewForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1.5 text-sm'},
             ['RMAX','Hydrotech','Both'].map(v=>React.createElement('option',{key:v,value:v},v))
+          )
+        : type==='ctype'
+        ? React.createElement('select', {value:newForm[key]||'', onChange:e=>setNewForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1.5 text-sm'},
+            CUSTOMER_TYPES.map(v=>React.createElement('option',{key:v||'blank',value:v},v||'— Select type —'))
           )
         : React.createElement('input', {type:'text', value:newForm[key]||'', placeholder:label, onChange:e=>setNewForm(f=>({...f,[key]:e.target.value})), className:'w-full border rounded px-2 py-1.5 text-sm'})
     );
@@ -1158,7 +1167,8 @@ function CustomerDirectory() {
       React.createElement('div', {className:'font-semibold text-blue-900 mb-3'}, 'New Contact'),
       React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3'},
         newRow('Name','name'), newRow('Company','company'), newRow('Phone','phone'),
-        newRow('Email','email'), newRow('Location','location'), newRow('Product Line','product_line','select')
+        newRow('Email','email'), newRow('Location','location'), newRow('Product Line','product_line','select'),
+        newRow('Customer Type','customer_type','ctype')
       ),
       React.createElement('div', {className:'flex gap-2'},
         React.createElement('button', {onClick:saveNew, className:'px-4 py-1.5 rounded text-sm font-medium text-white', style:{background:'#1d4ed8'}}, 'Save'),
@@ -1224,7 +1234,9 @@ function CustomerDirectory() {
                     React.createElement('div', {className:'grid grid-cols-1 gap-2 mb-3'},
                       editRow('Name','name'), editRow('Company','company'), editRow('Phone','phone'),
                       editRow('Email','email'), editRow('Location','location'),
-                      editRow('Product Line','product_line','select'), editRow('Notes','notes','textarea')
+                      editRow('Product Line','product_line','select'),
+                      editRow('Customer Type','customer_type','ctype'),
+                      editRow('Notes','notes','textarea')
                     ),
                     React.createElement('div', {className:'flex gap-2'},
                       React.createElement('button', {onClick:saveEdit, className:'flex-1 py-1.5 rounded text-sm font-medium text-white', style:{background:'#1d4ed8'}}, 'Save'),
@@ -1235,7 +1247,8 @@ function CustomerDirectory() {
                     React.createElement('div', {className:'font-semibold text-gray-900 text-base mb-0.5 truncate'},
                       c.name||React.createElement('span',{className:'text-gray-400 italic text-sm'},'No name — click ✏️')
                     ),
-                    c.company&&React.createElement('div',{className:'text-sm text-gray-600 mb-1 truncate'},c.company),
+                    c.company&&React.createElement('div',{className:'text-sm text-gray-600 mb-0.5 truncate'},c.company),
+                    c.customer_type&&React.createElement('div',{className:'text-xs font-medium text-indigo-600 mb-1'},c.customer_type),
                     React.createElement('div', {className:'mt-2 space-y-1.5'},
                       c.email&&React.createElement('div',{className:'flex items-center gap-2 text-sm'},
                         React.createElement('span',{className:'text-gray-400 text-xs'},'✉'),
