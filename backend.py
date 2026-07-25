@@ -592,6 +592,8 @@ def sync_debug():
     # List all top-level folders
     try:
         r = _req.get(f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders?$select=id,displayName&$top=100", headers=hdrs, timeout=20)
+        result["folders_status"] = r.status_code
+        result["folders_raw"] = r.text[:500]
         if r.status_code == 200:
             folders = r.json().get("value", [])
             result["folders"] = [f["displayName"] for f in folders]
@@ -605,6 +607,8 @@ def sync_debug():
     if not result["rmax_quotes_folder_id"]:
         try:
             r = _req.get(f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/Inbox/childFolders?$select=id,displayName&$top=100", headers=hdrs, timeout=20)
+            result["inbox_children_status"] = r.status_code
+            result["inbox_children_raw"] = r.text[:500]
             if r.status_code == 200:
                 children = r.json().get("value", [])
                 result["inbox_children"] = [f["displayName"] for f in children]
