@@ -402,9 +402,8 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
   const searchRef = useRef();
   const QUOTE_REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
 
-  // silent=true → update quotes in place without showing spinner or losing scroll
+  // silent=true → update quotes in place without showing spinner
   const load = useCallback(async (silent = false) => {
-    const savedScroll = window.scrollY;
     if (!silent) setLoading(true);
     const params = new URLSearchParams();
     if (filters.status !== 'All') params.set('status', filters.status);
@@ -412,7 +411,7 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
     const data = await apiFetch(quotesBase + '?' + params);
     setQuotes(data);
     if (!silent) setLoading(false);
-    if (silent) requestAnimationFrame(() => window.scrollTo(0, savedScroll));
+    // Scroll restore is handled by the caller (closeModal) — React itself doesn't reset scrollY
   }, [filters]);
 
   // Filter changes: full load with spinner
@@ -1527,14 +1526,19 @@ function App() {
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+  const scrollBeforeModal = React.useRef(0);
 
-  function openEdit(q, cfg) { setModal(q); setModalCfg(cfg || RMAX_CFG); }
+  function openEdit(q, cfg) {
+    scrollBeforeModal.current = window.scrollY;   // capture before modal opens
+    setModal(q);
+    setModalCfg(cfg || RMAX_CFG);
+  }
   function closeModal(saved) {
-    const y = window.scrollY;          // capture before modal unmounts / focus shifts
+    const y = scrollBeforeModal.current;
     setModal(null);
     if (saved) setRefresh(r => r+1);
-    // Double-rAF: first frame lets React commit + browser process focus change,
-    // second frame runs after any browser-initiated scroll, then we restore.
+    // Double-rAF: fires after React commits + any browser focus-scroll,
+    // restoring to the position from when the modal was opened.
     requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
   }
 
