@@ -1620,7 +1620,7 @@ function App() {
       : tab === 'sales'      ? React.createElement(SalesTab)
       : tab === 'directory'  ? React.createElement(CustomerDirectory, {key:'dir'})
       : tab === 'hydrotech' ? React.createElement(QuoteList, {
-          key: 'hydrotech-' + refresh,
+          key: 'hydrotech',
           refresh,
           onEdit: q => openEdit(q, HYDROTECH_CFG),
           onRefresh: () => doRefresh(HYDROTECH_CFG),
@@ -1628,7 +1628,7 @@ function App() {
           cfg: HYDROTECH_CFG,
         })
       : React.createElement(QuoteList, {
-          key: 'rmax-' + refresh,
+          key: 'rmax',
           refresh,
           onEdit: q => openEdit(q, RMAX_CFG),
           onRefresh: () => doRefresh(RMAX_CFG),
