@@ -1526,20 +1526,24 @@ function App() {
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
-  const scrollBeforeModal = React.useRef(0);
-
   function openEdit(q, cfg) {
-    scrollBeforeModal.current = window.scrollY;   // capture before modal opens
+    // Lock body scroll so nothing can jump while modal is open
+    const y = window.scrollY;
+    document.body.style.position = 'fixed';
+    document.body.style.top      = `-${y}px`;
+    document.body.style.width    = '100%';
     setModal(q);
     setModalCfg(cfg || RMAX_CFG);
   }
   function closeModal(saved) {
-    const y = scrollBeforeModal.current;
+    // Restore body scroll before any React state changes
+    const y = Math.abs(parseInt(document.body.style.top || '0', 10));
+    document.body.style.position = '';
+    document.body.style.top      = '';
+    document.body.style.width    = '';
+    window.scrollTo(0, y);
     setModal(null);
     if (saved) setRefresh(r => r+1);
-    // Double-rAF: fires after React commits + any browser focus-scroll,
-    // restoring to the position from when the modal was opened.
-    requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
   }
 
   function doRefresh(cfg) {
