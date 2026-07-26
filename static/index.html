@@ -1595,7 +1595,7 @@ function App() {
     splashVisible && React.createElement('div', {
       style:{
         position:'fixed', inset:0, zIndex:9999,
-        background:'#0d1b2a',
+        background:'#1F4E79',
         display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
         opacity: splashFading ? 0 : 1,
         transition: splashFading ? 'opacity 0.8s ease' : 'none',
@@ -1604,37 +1604,67 @@ function App() {
         fontFamily:'inherit',
       }
     },
-      // Blueprint grid SVG background
+      // Architectural line drawing SVG background
       React.createElement('svg', {
-        style:{position:'absolute', inset:0, width:'100%', height:'100%', opacity:0.18},
+        style:{position:'absolute', inset:0, width:'100%', height:'100%'},
         xmlns:'http://www.w3.org/2000/svg'
       },
         React.createElement('defs', null,
-          React.createElement('pattern', {id:'smallGrid', width:'40', height:'40', patternUnits:'userSpaceOnUse'},
-            React.createElement('path', {d:'M 40 0 L 0 0 0 40', fill:'none', stroke:'#4a9eff', strokeWidth:'0.5'})
+          React.createElement('pattern', {id:'finegrid', width:'60', height:'60', patternUnits:'userSpaceOnUse'},
+            React.createElement('path', {d:'M 60 0 L 0 0 0 60', fill:'none', stroke:'rgba(255,255,255,0.07)', strokeWidth:'0.5'})
           ),
-          React.createElement('pattern', {id:'bigGrid', width:'200', height:'200', patternUnits:'userSpaceOnUse'},
-            React.createElement('rect', {width:'200', height:'200', fill:'url(#smallGrid)'}),
-            React.createElement('path', {d:'M 200 0 L 0 0 0 200', fill:'none', stroke:'#4a9eff', strokeWidth:'1.5'})
+          React.createElement('pattern', {id:'coarsegrid', width:'300', height:'300', patternUnits:'userSpaceOnUse'},
+            React.createElement('rect', {width:'300', height:'300', fill:'url(#finegrid)'}),
+            React.createElement('path', {d:'M 300 0 L 0 0 0 300', fill:'none', stroke:'rgba(255,255,255,0.15)', strokeWidth:'1'})
           )
         ),
-        React.createElement('rect', {width:'100%', height:'100%', fill:'url(#bigGrid)'})
-      ),
-      // Building silhouette at bottom
-      React.createElement('svg', {
-        style:{position:'absolute', bottom:0, left:0, right:0, width:'100%', opacity:0.12},
-        viewBox:'0 0 1200 220', xmlns:'http://www.w3.org/2000/svg', preserveAspectRatio:'xMidYMax slice'
-      },
+        // Grid
+        React.createElement('rect', {width:'100%', height:'100%', fill:'url(#coarsegrid)'}),
+        // Architectural detail lines — floor plan shapes, left side
+        React.createElement('g', {stroke:'rgba(255,255,255,0.18)', strokeWidth:'1', fill:'none'},
+          // Large building outline left
+          React.createElement('rect', {x:'40', y:'80', width:'220', height:'340'}),
+          React.createElement('rect', {x:'60', y:'100', width:'80', height:'100'}),
+          React.createElement('rect', {x:'160', y:'100', width:'80', height:'100'}),
+          React.createElement('line', {x1:'40', y1:'220', x2:'260', y2:'220'}),
+          React.createElement('line', {x1:'120', y1:'80', x2:'120', y2:'420'}),
+          // Dimension tick marks left
+          React.createElement('line', {x1:'20', y1:'80', x2:'36', y2:'80'}),
+          React.createElement('line', {x1:'20', y1:'420', x2:'36', y2:'420'}),
+          React.createElement('line', {x1:'28', y1:'80', x2:'28', y2:'420'}),
+          // Centerlines (dashed style via longer segments)
+          React.createElement('line', {x1:'150', y1:'60', x2:'150', y2:'440', strokeDasharray:'8,4', stroke:'rgba(255,255,255,0.1)'}),
+        ),
+        // Architectural detail lines — right side
+        React.createElement('g', {stroke:'rgba(255,255,255,0.18)', strokeWidth:'1', fill:'none'},
+          // Building elevation right
+          React.createElement('rect', {x:'900', y:'100', width:'260', height:'320'}),
+          React.createElement('rect', {x:'920', y:'60', width:'80', height:'40'}),
+          React.createElement('rect', {x:'1060', y:'60', width:'80', height:'40'}),
+          React.createElement('rect', {x:'920', y:'140', width:'60', height:'80'}),
+          React.createElement('rect', {x:'1000', y:'140', width:'60', height:'80'}),
+          React.createElement('rect', {x:'1080', y:'140', width:'60', height:'80'}),
+          React.createElement('rect', {x:'950', y:'280', width:'120', height:'140'}),
+          React.createElement('line', {x1:'900', y1:'240', x2:'1160', y2:'240'}),
+          // Dimension ticks right
+          React.createElement('line', {x1:'1180', y1:'100', x2:'1164', y2:'100'}),
+          React.createElement('line', {x1:'1180', y1:'420', x2:'1164', y2:'420'}),
+          React.createElement('line', {x1:'1172', y1:'100', x2:'1172', y2:'420'}),
+          React.createElement('line', {x1:'900', y1:'44', x2:'900', y2:'58'}),
+          React.createElement('line', {x1:'1160', y1:'44', x2:'1160', y2:'58'}),
+          React.createElement('line', {x1:'900', y1:'51', x2:'1160', y2:'51'}),
+        ),
+        // Building silhouette at bottom
         React.createElement('path', {
-          d:'M0,220 L0,160 L80,160 L80,80 L120,80 L120,40 L160,40 L160,80 L200,80 L200,160 L260,160 L260,100 L300,100 L300,60 L340,60 L340,100 L380,100 L380,160 L420,160 L420,120 L460,120 L460,80 L500,80 L500,60 L520,60 L520,80 L560,80 L560,120 L600,120 L600,160 L650,160 L650,90 L680,90 L680,50 L720,50 L720,90 L750,90 L750,160 L800,160 L800,110 L840,110 L840,70 L880,70 L880,110 L920,110 L920,160 L960,160 L960,130 L1000,130 L1000,100 L1040,100 L1040,130 L1080,130 L1080,160 L1200,160 L1200,220 Z',
-          fill:'#4a9eff'
+          d:'M0,100% L0,75% L6%,75% L6%,55% L9%,55% L9%,35% L12%,35% L12%,55% L16%,55% L16%,75% L21%,75% L21%,50% L24%,50% L24%,30% L28%,30% L28%,50% L31%,50% L31%,75% L35%,75% L35%,60% L38%,60% L38%,40% L41%,40% L41%,60% L47%,60% L47%,75% L50%,75% L50%,55% L54%,55% L54%,35% L58%,35% L58%,55% L62%,55% L62%,75% L66%,75% L66%,62% L70%,62% L70%,75% L75%,75% L75%,50% L78%,50% L78%,28% L81%,28% L81%,50% L84%,50% L84%,75% L88%,75% L88%,58% L91%,58% L91%,38% L95%,38% L95%,58% L100%,58% L100%,100% Z',
+          fill:'rgba(255,255,255,0.08)', stroke:'rgba(255,255,255,0.2)', strokeWidth:'1'
         })
       ),
       // Corner bracket accents
-      React.createElement('div', {style:{position:'absolute', top:'32px', left:'32px', width:'40px', height:'40px', borderTop:'3px solid #f97316', borderLeft:'3px solid #f97316'}}),
-      React.createElement('div', {style:{position:'absolute', top:'32px', right:'32px', width:'40px', height:'40px', borderTop:'3px solid #f97316', borderRight:'3px solid #f97316'}}),
-      React.createElement('div', {style:{position:'absolute', bottom:'32px', left:'32px', width:'40px', height:'40px', borderBottom:'3px solid #f97316', borderLeft:'3px solid #f97316'}}),
-      React.createElement('div', {style:{position:'absolute', bottom:'32px', right:'32px', width:'40px', height:'40px', borderBottom:'3px solid #f97316', borderRight:'3px solid #f97316'}}),
+      React.createElement('div', {style:{position:'absolute', top:'32px', left:'32px', width:'40px', height:'40px', borderTop:'2px solid rgba(255,255,255,0.5)', borderLeft:'2px solid rgba(255,255,255,0.5)'}}),
+      React.createElement('div', {style:{position:'absolute', top:'32px', right:'32px', width:'40px', height:'40px', borderTop:'2px solid rgba(255,255,255,0.5)', borderRight:'2px solid rgba(255,255,255,0.5)'}}),
+      React.createElement('div', {style:{position:'absolute', bottom:'32px', left:'32px', width:'40px', height:'40px', borderBottom:'2px solid rgba(255,255,255,0.5)', borderLeft:'2px solid rgba(255,255,255,0.5)'}}),
+      React.createElement('div', {style:{position:'absolute', bottom:'32px', right:'32px', width:'40px', height:'40px', borderBottom:'2px solid rgba(255,255,255,0.5)', borderRight:'2px solid rgba(255,255,255,0.5)'}}),
       // Centre content
       React.createElement('div', {
         style:{
