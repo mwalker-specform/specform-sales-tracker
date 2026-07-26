@@ -93,7 +93,8 @@ def init_db():
         # Add columns to existing databases that predate this schema
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
-                                 ('region',            'TEXT')]:
+                                 ('region',            'TEXT'),
+                                 ('deleted',           'INTEGER DEFAULT 0')]:
             try:
                 con.execute(f"ALTER TABLE quotes ADD COLUMN {col} {definition}")
             except Exception:
@@ -170,7 +171,7 @@ def list_quotes(
     search:   Optional[str] = Query(None),
 ):
     with get_db() as con:
-        sql = "SELECT * FROM quotes WHERE 1=1"
+        sql = "SELECT * FROM quotes WHERE (deleted IS NULL OR deleted=0)"
         params = []
         if status and status != "All":
             sql += " AND status = ?"
@@ -189,7 +190,7 @@ def list_quotes(
 @app.get("/api/quotes/{quote_id}")
 def get_quote(quote_id: int):
     with get_db() as con:
-        row = con.execute("SELECT * FROM quotes WHERE id=?", (quote_id,)).fetchone()
+        row = con.execute("SELECT * FROM quotes WHERE id=? AND (deleted IS NULL OR deleted=0)", (quote_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Quote not found")
         return dict(row)
@@ -231,7 +232,8 @@ def update_quote(quote_id: int, q: QuoteIn):
 @app.delete("/api/quotes/{quote_id}")
 def delete_quote(quote_id: int):
     with get_db() as con:
-        con.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
+        # Soft delete — keeps row so sync won't re-import the same email
+        con.execute("UPDATE quotes SET deleted=1 WHERE id=?", (quote_id,))
         return {"ok": True}
 
 @app.get("/api/quotes-export")
@@ -249,7 +251,7 @@ def export_quotes():
                    job_name, customer, location, product, price, quantities,
                    amount, close_date, est_freight, lead_time, notes,
                    add_to_salesforce, completed
-            FROM quotes ORDER BY date_received DESC
+            FROM quotes WHERE (deleted IS NULL OR deleted=0) ORDER BY date_received DESC
         """).fetchall()
 
     wb = openpyxl.Workbook()
@@ -681,7 +683,7 @@ def dashboard():
                 COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
                 COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count,
                 COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost_amount
-            FROM quotes
+            FROM quotes WHERE (deleted IS NULL OR deleted=0)
         """).fetchone()
 
         # By location
@@ -691,7 +693,7 @@ def dashboard():
                 COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
                 COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
             FROM quotes
-            WHERE location IS NOT NULL
+            WHERE (deleted IS NULL OR deleted=0) AND location IS NOT NULL
             GROUP BY location
             ORDER BY total DESC
         """).fetchall()
@@ -699,7 +701,7 @@ def dashboard():
         # By month — parse dates in Python to handle M/D/YYYY, "Jul 13, 2026", etc.
         cutoff = datetime.now().replace(day=1) - timedelta(days=335)  # ~11 months ago
         raw_quotes = con.execute(
-            "SELECT date_received, status, amount FROM quotes WHERE date_received IS NOT NULL AND date_received != ''"
+            "SELECT date_received, status, amount FROM quotes WHERE (deleted IS NULL OR deleted=0) AND date_received IS NOT NULL AND date_received != ''"
         ).fetchall()
         month_acc = defaultdict(lambda: dict(total_quotes=0,total=0.0,won=0.0,verbal=0.0,lost=0.0,won_count=0,verbal_count=0,lost_count=0))
         for row in raw_quotes:
@@ -720,14 +722,14 @@ def dashboard():
         by_status = con.execute("""
             SELECT status, COUNT(*) as count, COALESCE(SUM(amount),0) as amount
             FROM quotes
-            WHERE status IS NOT NULL
+            WHERE (deleted IS NULL OR deleted=0) AND status IS NOT NULL
             GROUP BY status
             ORDER BY amount DESC
         """).fetchall()
 
         # Distinct filter options
         locations = [r[0] for r in con.execute(
-            "SELECT DISTINCT location FROM quotes WHERE location IS NOT NULL ORDER BY location"
+            "SELECT DISTINCT location FROM quotes WHERE (deleted IS NULL OR deleted=0) AND location IS NOT NULL ORDER BY location"
         ).fetchall()]
 
         return {
@@ -1492,7 +1494,7 @@ def import_contacts_from_quotes():
     """Scan both quote tables and create contact entries for unique sent_to emails."""
     from collections import defaultdict
     with get_db() as con:
-        rmax_rows  = con.execute("SELECT DISTINCT sent_to, customer, location FROM quotes WHERE sent_to IS NOT NULL AND sent_to != ''").fetchall()
+        rmax_rows  = con.execute("SELECT DISTINCT sent_to, customer, location FROM quotes WHERE (deleted IS NULL OR deleted=0) AND sent_to IS NOT NULL AND sent_to != ''").fetchall()
         hydro_rows = con.execute("SELECT DISTINCT sent_to, customer, location FROM hydrotech_quotes WHERE sent_to IS NOT NULL AND sent_to != ''").fetchall()
 
         contact_map = defaultdict(lambda: {"company": "", "location": "", "sources": set()})
