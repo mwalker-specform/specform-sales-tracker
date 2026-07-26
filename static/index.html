@@ -1543,6 +1543,13 @@ function App() {
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+  const [splashVisible, setSplashVisible] = useState(true);
+  const [splashFading, setSplashFading]   = useState(false);
+  React.useEffect(() => {
+    const fadeTimer = setTimeout(() => setSplashFading(true), 2700);
+    const hideTimer = setTimeout(() => setSplashVisible(false), 3500);
+    return () => { clearTimeout(fadeTimer); clearTimeout(hideTimer); };
+  }, []);
   function openEdit(q, cfg) {
     // Lock body scroll so nothing can jump while modal is open
     const y = window.scrollY;
@@ -1584,6 +1591,26 @@ function App() {
   }
 
   return React.createElement('div', {className:'min-h-screen'},
+    // Splash screen
+    splashVisible && React.createElement('div', {
+      style:{
+        position:'fixed', inset:0, zIndex:9999,
+        background:'#1F4E79',
+        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'28px',
+        opacity: splashFading ? 0 : 1,
+        transition: splashFading ? 'opacity 0.8s ease' : 'none',
+        pointerEvents: splashFading ? 'none' : 'auto',
+      }
+    },
+      React.createElement('img', {
+        src:'/static/logo.png',
+        alt:'Specform',
+        style:{height:'90px', filter:'brightness(0) invert(1)'}
+      }),
+      React.createElement('div', {
+        style:{color:'#fff', fontSize:'26px', fontWeight:'700', letterSpacing:'0.02em', textAlign:'center', lineHeight:'1.3'}
+      }, 'Welcome to the SPECFORM Sales Tracker')
+    ),
     // Header
     React.createElement('header', {className:'bg-[#1F4E79] text-white shadow'},
       React.createElement('div', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between'},
