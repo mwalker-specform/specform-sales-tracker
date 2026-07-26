@@ -138,6 +138,7 @@ app.add_middleware(
 def startup():
     init_db()
     init_hydrotech_db()
+    init_glassworks_db()
     init_contacts_db()
     migrate_dates()
 
@@ -413,7 +414,7 @@ def _parse_quote_email(subject: str, body_html: str, content_type: str) -> dict:
     # Fallback: derive job name from subject if body label missing
     if not job and subject:
         job = _sync_re.sub(
-            r'^(re:|fw:|fwd:|(?:rmax|hydrotech)\s+quotes?\s*[-–:]\s*)+',
+            r'^(re:|fw:|fwd:|(?:rmax|hydrotech|glassworks)\s+quotes?\s*[-–:]\s*)+',
             '', subject, flags=_sync_re.IGNORECASE
         ).strip()
 
@@ -1031,7 +1032,8 @@ def init_hydrotech_db():
         )""")
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
-                                 ('region',            'TEXT')]:
+                                 ('region',            'TEXT'),
+                                 ('deleted',           'INTEGER DEFAULT 0')]:
             try:
                 con.execute(f"ALTER TABLE hydrotech_quotes ADD COLUMN {col} {definition}")
             except Exception:
@@ -1044,7 +1046,7 @@ def list_hydrotech_quotes(
     search:   Optional[str] = Query(None),
 ):
     with get_db() as con:
-        sql = "SELECT * FROM hydrotech_quotes WHERE 1=1"
+        sql = "SELECT * FROM hydrotech_quotes WHERE (deleted IS NULL OR deleted=0)"
         params = []
         if status and status != "All":
             sql += " AND status = ?"
@@ -1063,7 +1065,7 @@ def list_hydrotech_quotes(
 @app.get("/api/hydrotech-quotes/{quote_id}")
 def get_hydrotech_quote(quote_id: int):
     with get_db() as con:
-        row = con.execute("SELECT * FROM hydrotech_quotes WHERE id=?", (quote_id,)).fetchone()
+        row = con.execute("SELECT * FROM hydrotech_quotes WHERE id=? AND (deleted IS NULL OR deleted=0)", (quote_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Hydrotech quote not found")
         return dict(row)
@@ -1103,7 +1105,7 @@ def update_hydrotech_quote(quote_id: int, q: QuoteIn):
 @app.delete("/api/hydrotech-quotes/{quote_id}")
 def delete_hydrotech_quote(quote_id: int):
     with get_db() as con:
-        con.execute("DELETE FROM hydrotech_quotes WHERE id=?", (quote_id,))
+        con.execute("UPDATE hydrotech_quotes SET deleted=1 WHERE id=?", (quote_id,))
         return {"ok": True}
 
 @app.get("/api/hydrotech-quotes-export")
@@ -1286,6 +1288,307 @@ def hydrotech_sync():
 
             con.execute("""
             INSERT INTO hydrotech_quotes
+                (date_received, sent_to, subject, job_name, customer, location,
+                 product, price, quantities, amount, est_freight, lead_time)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                date_received, sent_to, subject,
+                parsed.get('job_name'), parsed.get('customer'), parsed.get('location'),
+                parsed.get('product'), parsed.get('price'), parsed.get('quantities'),
+                parsed.get('amount'), parsed.get('est_freight'), parsed.get('lead_time'),
+            ))
+            inserted += 1
+
+    parts = []
+    if inserted: parts.append(f"{inserted} new quote{'' if inserted==1 else 's'} imported")
+    if updated:  parts.append(f"{updated} updated")
+    msg_text = "✓ " + ", ".join(parts) if parts else "✓ Already up to date"
+    return {"inserted": inserted, "skipped": skipped, "message": msg_text}
+
+# ── Glassworks Quotes ────────────────────────────────────────────────────────
+
+def init_glassworks_db():
+    with get_db() as con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS glassworks_quotes (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            status             TEXT,
+            date_received      TEXT,
+            date_quoted        TEXT,
+            sent_to            TEXT,
+            subject            TEXT,
+            job_name           TEXT,
+            customer           TEXT,
+            location           TEXT,
+            product            TEXT,
+            price              TEXT,
+            quantities         TEXT,
+            amount             REAL,
+            close_date         TEXT,
+            est_freight        TEXT,
+            lead_time          TEXT,
+            notes              TEXT,
+            region             TEXT,
+            add_to_salesforce  INTEGER DEFAULT 0,
+            completed          INTEGER DEFAULT 0,
+            deleted            INTEGER DEFAULT 0,
+            created_at         TEXT DEFAULT (datetime('now')),
+            updated_at         TEXT DEFAULT (datetime('now'))
+        )""")
+        for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
+                                 ('completed',         'INTEGER DEFAULT 0'),
+                                 ('region',            'TEXT'),
+                                 ('deleted',           'INTEGER DEFAULT 0')]:
+            try:
+                con.execute(f"ALTER TABLE glassworks_quotes ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
+
+@app.get("/api/glassworks-quotes")
+def list_glassworks_quotes(
+    status:   Optional[str] = Query(None),
+    location: Optional[str] = Query(None),
+    search:   Optional[str] = Query(None),
+):
+    with get_db() as con:
+        sql = "SELECT * FROM glassworks_quotes WHERE (deleted IS NULL OR deleted=0)"
+        params = []
+        if status and status != "All":
+            sql += " AND status = ?"
+            params.append(status)
+        if location and location != "All":
+            sql += " AND location = ?"
+            params.append(location)
+        if search:
+            sql += " AND (subject LIKE ? OR sent_to LIKE ? OR job_name LIKE ? OR customer LIKE ? OR location LIKE ?)"
+            s = f"%{search}%"
+            params += [s, s, s, s, s]
+        sql += " ORDER BY date_received DESC"
+        rows = con.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+@app.get("/api/glassworks-quotes/{quote_id}")
+def get_glassworks_quote(quote_id: int):
+    with get_db() as con:
+        row = con.execute("SELECT * FROM glassworks_quotes WHERE id=? AND (deleted IS NULL OR deleted=0)", (quote_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Glassworks quote not found")
+        return dict(row)
+
+@app.post("/api/glassworks-quotes", status_code=201)
+def create_glassworks_quote(q: QuoteIn):
+    with get_db() as con:
+        cur = con.execute("""
+        INSERT INTO glassworks_quotes (status,date_received,date_quoted,sent_to,subject,job_name,
+            customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
+            region,add_to_salesforce,completed)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
+              q.sent_to,q.subject,q.job_name,
+              q.customer,q.location,q.product,q.price,q.quantities,q.amount,
+              normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
+              q.region,q.add_to_salesforce,q.completed))
+        return {"id": cur.lastrowid}
+
+@app.put("/api/glassworks-quotes/{quote_id}")
+def update_glassworks_quote(quote_id: int, q: QuoteIn):
+    with get_db() as con:
+        existing = con.execute("SELECT id FROM glassworks_quotes WHERE id=?", (quote_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "Glassworks quote not found")
+        con.execute("""
+        UPDATE glassworks_quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
+            job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
+            close_date=?,est_freight=?,lead_time=?,notes=?,
+            region=?,add_to_salesforce=?,completed=?,updated_at=datetime('now')
+        WHERE id=?
+        """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
+              q.sent_to,q.subject,q.job_name,
+              q.customer,q.location,q.product,q.price,q.quantities,q.amount,
+              normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
+              q.region,q.add_to_salesforce,q.completed,quote_id))
+        return {"ok": True}
+
+@app.delete("/api/glassworks-quotes/{quote_id}")
+def delete_glassworks_quote(quote_id: int):
+    with get_db() as con:
+        con.execute("UPDATE glassworks_quotes SET deleted=1 WHERE id=?", (quote_id,))
+        return {"ok": True}
+
+@app.get("/api/glassworks-quotes-export")
+def export_glassworks_quotes():
+    """Export all Glassworks quotes to a formatted Excel file."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from fastapi.responses import StreamingResponse
+    import io
+
+    with get_db() as con:
+        rows = con.execute("""
+            SELECT id, status, date_received, date_quoted, sent_to, subject,
+                   job_name, customer, location, product, price, quantities,
+                   amount, close_date, est_freight, lead_time, notes,
+                   add_to_salesforce, completed
+            FROM glassworks_quotes WHERE (deleted IS NULL OR deleted=0) ORDER BY date_received DESC
+        """).fetchall()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Glassworks Quotes"
+
+    header_font  = Font(name='Calibri', bold=True, color='FFFFFF', size=11)
+    header_fill  = PatternFill('solid', fgColor='0e7490')   # teal for Glassworks
+    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    border_side  = Side(style='thin', color='BFBFBF')
+    cell_border  = Border(left=border_side, right=border_side,
+                          top=border_side, bottom=border_side)
+    zebra_fill   = PatternFill('solid', fgColor='CFFAFE')
+    STATUS_FILLS = {
+        'Won':    PatternFill('solid', fgColor='D9EAD3'),
+        'Lost':   PatternFill('solid', fgColor='F4CCCC'),
+        'Verbal': PatternFill('solid', fgColor='FFF2CC'),
+    }
+
+    headers = [
+        ('ID', 8), ('Status', 12), ('Date Received', 14), ('Date Quoted', 14),
+        ('Sent To', 22), ('Subject', 30), ('Job Name', 28), ('Customer', 22),
+        ('Location', 18), ('Product', 16), ('Price', 12), ('Quantities', 14),
+        ('Amount', 14), ('Close Date', 14), ('Est. Freight', 14), ('Lead Time', 14),
+        ('Notes', 35), ('Salesforce', 12), ('Completed', 12),
+    ]
+    ws.row_dimensions[1].height = 30
+    for col_idx, (label, width) in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=label)
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = header_align
+        cell.border    = cell_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    ws.freeze_panes = 'A2'
+
+    for row_idx, q in enumerate(rows, start=2):
+        status   = q['status'] or ''
+        row_fill = STATUS_FILLS.get(status, (zebra_fill if row_idx % 2 == 0 else None))
+        values = [
+            q['id'], q['status'], q['date_received'], q['date_quoted'],
+            q['sent_to'], q['subject'], q['job_name'], q['customer'],
+            q['location'], q['product'], q['price'], q['quantities'],
+            q['amount'], q['close_date'], q['est_freight'], q['lead_time'],
+            q['notes'],
+            'Yes' if q['add_to_salesforce'] else '',
+            'Yes' if q['completed'] else '',
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border    = cell_border
+            cell.alignment = Alignment(vertical='top', wrap_text=(col_idx in (6, 7, 17)))
+            if row_fill:
+                cell.fill = row_fill
+            if col_idx == 13 and value is not None:
+                cell.number_format = '$#,##0.00'
+            if col_idx in (1, 2, 18, 19):
+                cell.alignment = Alignment(horizontal='center', vertical='top')
+
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"Glassworks_Quotes_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+@app.post("/api/glassworks-sync")
+def glassworks_sync():
+    """Pull new emails from 'Glassworks Quotes' Outlook folder via Graph API."""
+    if not GRAPH_CLIENT_SECRET:
+        return {"inserted": 0, "skipped": 0, "message": "Graph API not configured"}
+
+    try:
+        import requests as _req
+    except ImportError:
+        return {"inserted": 0, "skipped": 0, "message": "requests package not installed"}
+
+    try:
+        token = _get_graph_token()
+    except Exception as e:
+        return {"inserted": 0, "skipped": 0, "message": f"Auth failed: {e}"}
+
+    hdrs = {"Authorization": f"Bearer {token}"}
+
+    folder_id = None
+    for list_url in [
+        f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders?$select=id,displayName&$top=100",
+        f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/Inbox/childFolders?$select=id,displayName&$top=100",
+    ]:
+        try:
+            r = _req.get(list_url, headers=hdrs, timeout=20)
+            if r.status_code == 200:
+                for f in r.json().get("value", []):
+                    if (f.get("displayName") or "").strip().lower() == "glassworks quotes":
+                        folder_id = f["id"]
+                        break
+            if folder_id:
+                break
+        except Exception:
+            pass
+
+    if not folder_id:
+        return {"inserted": 0, "skipped": 0,
+                "message": "Could not find 'Glassworks Quotes' folder in Outlook — check folder name"}
+
+    msgs = []
+    next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                f"/mailFolders/{folder_id}/messages"
+                f"?$select=from,toRecipients,subject,receivedDateTime,body&$top=50")
+    while next_url and len(msgs) < 200:
+        try:
+            r = _req.get(next_url, headers=hdrs, timeout=30)
+            if r.status_code != 200:
+                return {"inserted": 0, "skipped": 0,
+                        "message": f"Graph API error {r.status_code}: {r.text[:200]}"}
+            data = r.json()
+            msgs.extend(data.get("value", []))
+            next_url = data.get("@odata.nextLink")
+        except Exception as e:
+            return {"inserted": 0, "skipped": 0, "message": f"Fetch error: {e}"}
+
+    inserted = updated = skipped = 0
+    with get_db() as con:
+        for msg in msgs:
+            to_recipients = msg.get("toRecipients", [])
+            if to_recipients:
+                first_to = to_recipients[0].get("emailAddress", {})
+                sent_to  = (first_to.get("name") or first_to.get("address") or "").strip()
+            else:
+                sent_to  = ""
+
+            subject       = (msg.get("subject") or "").strip()
+            received_raw  = msg.get("receivedDateTime", "")
+            date_received = received_raw[:10] if received_raw else ""
+
+            exists = con.execute(
+                "SELECT id, sent_to FROM glassworks_quotes WHERE subject=? AND date_received=?",
+                (subject, date_received)
+            ).fetchone()
+            if exists:
+                if sent_to and exists["sent_to"] != sent_to:
+                    con.execute("UPDATE glassworks_quotes SET sent_to=? WHERE id=?",
+                                (sent_to, exists["id"]))
+                    updated += 1
+                else:
+                    skipped += 1
+                continue
+
+            body_content = msg.get("body", {}).get("content", "")
+            content_type = msg.get("body", {}).get("contentType", "text")
+            parsed = _parse_quote_email(subject, body_content, content_type)
+
+            con.execute("""
+            INSERT INTO glassworks_quotes
                 (date_received, sent_to, subject, job_name, customer, location,
                  product, price, quantities, amount, est_freight, lead_time)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
