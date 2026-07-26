@@ -1544,13 +1544,6 @@ function App() {
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
-  const [splashVisible, setSplashVisible] = useState(true);
-  const [splashFading, setSplashFading]   = useState(false);
-  React.useEffect(() => {
-    const fadeTimer = setTimeout(() => setSplashFading(true), 2700);
-    const hideTimer = setTimeout(() => setSplashVisible(false), 3500);
-    return () => { clearTimeout(fadeTimer); clearTimeout(hideTimer); };
-  }, []);
   function openEdit(q, cfg) {
     // Lock body scroll so nothing can jump while modal is open
     const y = window.scrollY;
@@ -1592,18 +1585,6 @@ function App() {
   }
 
   return React.createElement('div', {className:'min-h-screen'},
-    // Splash screen
-    splashVisible && React.createElement('div', {
-      style:{
-        position:'fixed', inset:0, zIndex:9999,
-        backgroundImage:"url('/static/splash-bg.jpg')",
-        backgroundSize:'cover',
-        backgroundPosition:'center',
-        opacity: splashFading ? 0 : 1,
-        transition: splashFading ? 'opacity 0.8s ease' : 'none',
-        pointerEvents: splashFading ? 'none' : 'auto',
-      }
-    }),
     // Header
     React.createElement('header', {className:'bg-[#1F4E79] text-white shadow'},
       React.createElement('div', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between'},
