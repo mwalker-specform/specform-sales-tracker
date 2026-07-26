@@ -1595,48 +1595,85 @@ function App() {
     splashVisible && React.createElement('div', {
       style:{
         position:'fixed', inset:0, zIndex:9999,
-        background:'linear-gradient(135deg, #0f2d4a 0%, #1F4E79 50%, #2563ab 100%)',
-        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'0',
+        background:'#0d1b2a',
+        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
         opacity: splashFading ? 0 : 1,
         transition: splashFading ? 'opacity 0.8s ease' : 'none',
         pointerEvents: splashFading ? 'none' : 'auto',
         overflow:'hidden',
+        fontFamily:'inherit',
       }
     },
-      // Decorative circles
-      React.createElement('div', {style:{position:'absolute', width:'500px', height:'500px', borderRadius:'50%', background:'rgba(255,255,255,0.04)', top:'-120px', right:'-120px'}}),
-      React.createElement('div', {style:{position:'absolute', width:'350px', height:'350px', borderRadius:'50%', background:'rgba(255,255,255,0.04)', bottom:'-80px', left:'-80px'}}),
-      React.createElement('div', {style:{position:'absolute', width:'200px', height:'200px', borderRadius:'50%', background:'rgba(255,255,255,0.03)', bottom:'80px', right:'80px'}}),
-      // Card
+      // Blueprint grid SVG background
+      React.createElement('svg', {
+        style:{position:'absolute', inset:0, width:'100%', height:'100%', opacity:0.18},
+        xmlns:'http://www.w3.org/2000/svg'
+      },
+        React.createElement('defs', null,
+          React.createElement('pattern', {id:'smallGrid', width:'40', height:'40', patternUnits:'userSpaceOnUse'},
+            React.createElement('path', {d:'M 40 0 L 0 0 0 40', fill:'none', stroke:'#4a9eff', strokeWidth:'0.5'})
+          ),
+          React.createElement('pattern', {id:'bigGrid', width:'200', height:'200', patternUnits:'userSpaceOnUse'},
+            React.createElement('rect', {width:'200', height:'200', fill:'url(#smallGrid)'}),
+            React.createElement('path', {d:'M 200 0 L 0 0 0 200', fill:'none', stroke:'#4a9eff', strokeWidth:'1.5'})
+          )
+        ),
+        React.createElement('rect', {width:'100%', height:'100%', fill:'url(#bigGrid)'})
+      ),
+      // Building silhouette at bottom
+      React.createElement('svg', {
+        style:{position:'absolute', bottom:0, left:0, right:0, width:'100%', opacity:0.12},
+        viewBox:'0 0 1200 220', xmlns:'http://www.w3.org/2000/svg', preserveAspectRatio:'xMidYMax slice'
+      },
+        React.createElement('path', {
+          d:'M0,220 L0,160 L80,160 L80,80 L120,80 L120,40 L160,40 L160,80 L200,80 L200,160 L260,160 L260,100 L300,100 L300,60 L340,60 L340,100 L380,100 L380,160 L420,160 L420,120 L460,120 L460,80 L500,80 L500,60 L520,60 L520,80 L560,80 L560,120 L600,120 L600,160 L650,160 L650,90 L680,90 L680,50 L720,50 L720,90 L750,90 L750,160 L800,160 L800,110 L840,110 L840,70 L880,70 L880,110 L920,110 L920,160 L960,160 L960,130 L1000,130 L1000,100 L1040,100 L1040,130 L1080,130 L1080,160 L1200,160 L1200,220 Z',
+          fill:'#4a9eff'
+        })
+      ),
+      // Corner bracket accents
+      React.createElement('div', {style:{position:'absolute', top:'32px', left:'32px', width:'40px', height:'40px', borderTop:'3px solid #f97316', borderLeft:'3px solid #f97316'}}),
+      React.createElement('div', {style:{position:'absolute', top:'32px', right:'32px', width:'40px', height:'40px', borderTop:'3px solid #f97316', borderRight:'3px solid #f97316'}}),
+      React.createElement('div', {style:{position:'absolute', bottom:'32px', left:'32px', width:'40px', height:'40px', borderBottom:'3px solid #f97316', borderLeft:'3px solid #f97316'}}),
+      React.createElement('div', {style:{position:'absolute', bottom:'32px', right:'32px', width:'40px', height:'40px', borderBottom:'3px solid #f97316', borderRight:'3px solid #f97316'}}),
+      // Centre content
       React.createElement('div', {
         style:{
           position:'relative', zIndex:1,
-          display:'flex', flexDirection:'column', alignItems:'center', gap:'28px',
-          background:'rgba(255,255,255,0.07)',
-          border:'1px solid rgba(255,255,255,0.15)',
-          borderRadius:'24px',
-          padding:'56px 72px',
-          boxShadow:'0 20px 60px rgba(0,0,0,0.3)',
-          backdropFilter:'blur(4px)',
+          display:'flex', flexDirection:'column', alignItems:'center', gap:'24px',
+          textAlign:'center',
         }
       },
+        // Orange top rule
+        React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'12px', marginBottom:'8px'}},
+          React.createElement('div', {style:{width:'60px', height:'2px', background:'#f97316'}}),
+          React.createElement('div', {style:{width:'8px', height:'8px', background:'#f97316', transform:'rotate(45deg)'}}),
+          React.createElement('div', {style:{width:'60px', height:'2px', background:'#f97316'}})
+        ),
         React.createElement('img', {
           src:'/static/logo.png',
           alt:'Specform',
-          style:{height:'100px', filter:'brightness(0) invert(1)', dropShadow:'0 4px 12px rgba(0,0,0,0.3)'}
+          style:{height:'90px', filter:'brightness(0) invert(1)'}
         }),
-        React.createElement('div', {style:{width:'60px', height:'2px', background:'rgba(255,255,255,0.3)', borderRadius:'2px'}}),
-        React.createElement('div', {style:{textAlign:'center'}},
+        React.createElement('div', null,
           React.createElement('div', {
-            style:{color:'#fff', fontSize:'28px', fontWeight:'700', letterSpacing:'0.03em', lineHeight:'1.2', marginBottom:'10px'}
+            style:{color:'rgba(255,255,255,0.65)', fontSize:'13px', fontWeight:'600', letterSpacing:'0.2em', textTransform:'uppercase', marginBottom:'10px'}
           }, 'Welcome to the'),
           React.createElement('div', {
-            style:{color:'#93c5fd', fontSize:'32px', fontWeight:'800', letterSpacing:'0.05em', lineHeight:'1.2'}
-          }, 'SPECFORM Sales Tracker')
+            style:{color:'#ffffff', fontSize:'30px', fontWeight:'800', letterSpacing:'0.06em', textTransform:'uppercase', lineHeight:'1.1'}
+          }, 'SPECFORM'),
+          React.createElement('div', {
+            style:{color:'#f97316', fontSize:'16px', fontWeight:'600', letterSpacing:'0.25em', textTransform:'uppercase', marginTop:'6px'}
+          }, 'Sales Tracker')
+        ),
+        // Bottom rule
+        React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'12px', marginTop:'8px'}},
+          React.createElement('div', {style:{width:'60px', height:'2px', background:'#f97316'}}),
+          React.createElement('div', {style:{width:'8px', height:'8px', background:'#f97316', transform:'rotate(45deg)'}}),
+          React.createElement('div', {style:{width:'60px', height:'2px', background:'#f97316'}})
         ),
         React.createElement('div', {
-          style:{color:'rgba(255,255,255,0.5)', fontSize:'13px', letterSpacing:'0.08em', textTransform:'uppercase', marginTop:'4px'}
-        }, 'Loading…')
+          style:{color:'rgba(255,255,255,0.35)', fontSize:'11px', letterSpacing:'0.15em', textTransform:'uppercase'}
+        }, 'Building Better Together')
       )
     ),
     // Header
