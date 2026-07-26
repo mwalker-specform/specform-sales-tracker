@@ -243,13 +243,17 @@ function Dashboard() {
   const closureRate = (active.total_quotes || 0) > 0
     ? ((active.won_count / active.total_quotes) * 100).toFixed(1) + '%'
     : '—';
+  const dollarClosureRate = (active.total_amount || 0) > 0
+    ? ((active.won_amount / active.total_amount) * 100).toFixed(1) + '%'
+    : '—';
 
   const kpis = [
-    {label:'Total Quoted',  value:fmt(active.total_amount),   sub:`${active.total_quotes} quotes`,                              color:'#2563eb'},
-    {label:'Won',           value:fmt(active.won_amount),     sub:`${active.won_count} deals`,                                  color:'#16a34a'},
-    {label:'Verbal',        value:fmt(active.verbal_amount),  sub:`${active.verbal_count} pending`,                             color:'#ca8a04'},
-    {label:'Lost',          value:fmt(active.lost_amount||0), sub:`${active.lost_count||0} lost`,                               color:'#dc2626'},
-    {label:'Closure Rate',  value:closureRate,                sub:`${active.won_count} won of ${active.total_quotes} quoted`,   color:'#7c3aed'},
+    {label:'Total Quoted',   value:fmt(active.total_amount),   sub:`${active.total_quotes} quotes`,                            color:'#2563eb'},
+    {label:'Won',            value:fmt(active.won_amount),     sub:`${active.won_count} deals`,                                color:'#16a34a'},
+    {label:'Verbal',         value:fmt(active.verbal_amount),  sub:`${active.verbal_count} pending`,                           color:'#ca8a04'},
+    {label:'Lost',           value:fmt(active.lost_amount||0), sub:`${active.lost_count||0} lost`,                             color:'#dc2626'},
+    {label:'Closure Rate',   value:closureRate,                sub:`${active.won_count} won of ${active.total_quotes} quoted`, color:'#7c3aed'},
+    {label:'$ Closure Rate', value:dollarClosureRate,          sub:`${fmt(active.won_amount)} of ${fmt(active.total_amount)}`, color:'#0891b2'},
   ];
 
   // Build a full 12-month rolling grid (past 6 + current + future 5) filled with data
@@ -293,7 +297,7 @@ function Dashboard() {
           })
         )
       ),
-      React.createElement('div', {className:'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4'},
+      React.createElement('div', {className:'grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4'},
         kpis.map(k => React.createElement('div', {key:k.label, className:'kpi-card', style:{borderLeftColor:k.color}},
           React.createElement('div', {className:'text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1'}, k.label),
           React.createElement('div', {className:'text-2xl font-bold text-gray-800'}, k.value),
