@@ -133,6 +133,14 @@ const HYDROTECH_CFG = {
   label:         'Hydrotech',
   color:         '#16a34a',
 };
+const GLASSWORKS_CFG = {
+  quotesBase:    '/api/glassworks-quotes',
+  exportUrl:     '/api/glassworks-quotes-export',
+  syncUrl:       '/api/glassworks-sync',
+  dashboardBase: '/api/glassworks-dashboard',
+  label:         'Glassworks',
+  color:         '#0e7490',
+};
 
 // ── Quote Modal ───────────────────────────────────────────────────────────────
 function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
@@ -1616,6 +1624,11 @@ function App() {
           onClick:()=>setTab('hydrotech')
         }, '💧 Hydrotech Quotes'),
         React.createElement('button', {
+          className:`tab ${tab==='glassworks'?'tab-active':'tab-inactive'}`,
+          style: tab==='glassworks' ? {background:'#0e7490'} : {},
+          onClick:()=>setTab('glassworks')
+        }, '🪟 Glassworks Quotes'),
+        React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           style:{marginLeft:'auto'},
           onClick:()=>setTab('sales')
@@ -1635,6 +1648,14 @@ function App() {
           onRefresh: () => doRefresh(HYDROTECH_CFG),
           syncing, syncMsg,
           cfg: HYDROTECH_CFG,
+        })
+      : tab === 'glassworks' ? React.createElement(QuoteList, {
+          key: 'glassworks',
+          refresh,
+          onEdit: q => openEdit(q, GLASSWORKS_CFG),
+          onRefresh: () => doRefresh(GLASSWORKS_CFG),
+          syncing, syncMsg,
+          cfg: GLASSWORKS_CFG,
         })
       : React.createElement(QuoteList, {
           key: 'rmax',
