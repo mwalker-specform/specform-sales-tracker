@@ -38,7 +38,7 @@ def normalize_date(s: str) -> str:
     dt = parse_date(s)
     return dt.strftime('%Y-%m-%d') if dt else s
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -1110,6 +1110,20 @@ def delete_hydrotech_quote(quote_id: int):
     with get_db() as con:
         con.execute("UPDATE hydrotech_quotes SET deleted=1 WHERE id=?", (quote_id,))
         return {"ok": True}
+
+@app.post("/api/hydrotech-quotes/{quote_id}/upload-pdf")
+async def upload_hydrotech_pdf(quote_id: int, file: UploadFile):
+    """Manually attach a PDF to an existing Hydrotech quote."""
+    os.makedirs(os.path.join(DATA_DIR, "hydrotech_pdfs"), exist_ok=True)
+    safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in file.filename)
+    pdf_filename = f"{quote_id}_{safe_name}"
+    pdf_path = os.path.join(DATA_DIR, "hydrotech_pdfs", pdf_filename)
+    contents = await file.read()
+    with open(pdf_path, "wb") as f:
+        f.write(contents)
+    with get_db() as con:
+        con.execute("UPDATE hydrotech_quotes SET pdf_filename=? WHERE id=?", (pdf_filename, quote_id))
+    return {"ok": True, "pdf_filename": pdf_filename}
 
 @app.get("/api/hydrotech-pdf/{filename}")
 def serve_hydrotech_pdf(filename: str):
