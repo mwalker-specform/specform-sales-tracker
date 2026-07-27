@@ -420,6 +420,7 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
   const [filters, setFilters]           = useState({status:'All', search:''});
   const [regionFilter, setRegionFilter] = useState('All');
   const [deleting, setDeleting]         = useState(null);
+  const [salesforceOnly, setSalesforceOnly] = useState(false);
   const searchRef = useRef();
   const QUOTE_REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
 
@@ -483,6 +484,13 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
             return `${count} quote${count!==1?'s':''}`;
           })()
         ),
+        cfg.label === 'RMAX' && React.createElement('button', {
+          className:'btn flex items-center gap-2',
+          style: salesforceOnly
+            ? {background:'#7c3aed', color:'#fff', border:'none'}
+            : {background:'#f3f4f6', color:'#374151', border:'1px solid #d1d5db'},
+          onClick: () => setSalesforceOnly(v => !v)
+        }, salesforceOnly ? '✓ Salesforce Queue' : '☁ Salesforce Queue'),
         onNew && React.createElement('button', {
           className:'btn flex items-center gap-2',
           style:{background:'#1F4E79', color:'#fff', border:'none'},
@@ -527,10 +535,10 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
       if (quotes.length === 0) return React.createElement('p', {className:'text-center py-12 text-gray-400'}, 'No quotes found.');
 
 
-      // Apply region filter then group by region
-      const visibleQuotes = regionFilter === 'All'
-        ? quotes
-        : quotes.filter(q => ((q.region||'').trim()||'(No Region)') === regionFilter);
+      // Apply region filter + salesforce filter then group by region
+      const visibleQuotes = quotes
+        .filter(q => regionFilter === 'All' || ((q.region||'').trim()||'(No Region)') === regionFilter)
+        .filter(q => !salesforceOnly || q.add_to_salesforce);
 
       const grouped = {};
       visibleQuotes.forEach(q => {
