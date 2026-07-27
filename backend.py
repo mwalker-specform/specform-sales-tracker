@@ -1039,6 +1039,28 @@ def init_hydrotech_db():
                 con.execute(f"ALTER TABLE hydrotech_quotes ADD COLUMN {col} {definition}")
             except Exception:
                 pass
+        # Multi-PDF table
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS hydrotech_quote_pdfs (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            quote_id     INTEGER NOT NULL,
+            pdf_filename TEXT NOT NULL,
+            uploaded_at  TEXT DEFAULT (datetime('now'))
+        )""")
+        # Migrate any existing single pdf_filename values into the new table
+        existing = con.execute(
+            "SELECT id, pdf_filename FROM hydrotech_quotes WHERE pdf_filename IS NOT NULL AND pdf_filename != ''"
+        ).fetchall()
+        for row in existing:
+            dup = con.execute(
+                "SELECT id FROM hydrotech_quote_pdfs WHERE quote_id=? AND pdf_filename=?",
+                (row["id"], row["pdf_filename"])
+            ).fetchone()
+            if not dup:
+                con.execute(
+                    "INSERT INTO hydrotech_quote_pdfs (quote_id, pdf_filename) VALUES (?,?)",
+                    (row["id"], row["pdf_filename"])
+                )
     # Ensure PDF storage directory exists
     os.makedirs(os.path.join(DATA_DIR, "hydrotech_pdfs"), exist_ok=True)
 
@@ -1063,7 +1085,19 @@ def list_hydrotech_quotes(
             params += [s, s, s, s, s]
         sql += " ORDER BY date_received DESC"
         rows = con.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        quotes = [dict(r) for r in rows]
+        if quotes:
+            ids = [q["id"] for q in quotes]
+            pdf_rows = con.execute(
+                f"SELECT id, quote_id, pdf_filename FROM hydrotech_quote_pdfs WHERE quote_id IN ({','.join('?'*len(ids))}) ORDER BY uploaded_at",
+                ids
+            ).fetchall()
+            pdf_map = {}
+            for pr in pdf_rows:
+                pdf_map.setdefault(pr["quote_id"], []).append({"id": pr["id"], "filename": pr["pdf_filename"]})
+            for q in quotes:
+                q["pdfs"] = pdf_map.get(q["id"], [])
+        return quotes
 
 @app.get("/api/hydrotech-quotes/{quote_id}")
 def get_hydrotech_quote(quote_id: int):
@@ -1071,7 +1105,12 @@ def get_hydrotech_quote(quote_id: int):
         row = con.execute("SELECT * FROM hydrotech_quotes WHERE id=? AND (deleted IS NULL OR deleted=0)", (quote_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Hydrotech quote not found")
-        return dict(row)
+        q = dict(row)
+        pdf_rows = con.execute(
+            "SELECT id, pdf_filename FROM hydrotech_quote_pdfs WHERE quote_id=? ORDER BY uploaded_at", (quote_id,)
+        ).fetchall()
+        q["pdfs"] = [{"id": pr["id"], "filename": pr["pdf_filename"]} for pr in pdf_rows]
+        return q
 
 @app.post("/api/hydrotech-quotes", status_code=201)
 def create_hydrotech_quote(q: QuoteIn):
@@ -1113,7 +1152,7 @@ def delete_hydrotech_quote(quote_id: int):
 
 @app.post("/api/hydrotech-quotes/{quote_id}/upload-pdf")
 async def upload_hydrotech_pdf(quote_id: int, file: UploadFile):
-    """Manually attach a PDF to an existing Hydrotech quote."""
+    """Manually attach a PDF to an existing Hydrotech quote (supports multiple)."""
     os.makedirs(os.path.join(DATA_DIR, "hydrotech_pdfs"), exist_ok=True)
     safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in file.filename)
     pdf_filename = f"{quote_id}_{safe_name}"
@@ -1122,8 +1161,21 @@ async def upload_hydrotech_pdf(quote_id: int, file: UploadFile):
     with open(pdf_path, "wb") as f:
         f.write(contents)
     with get_db() as con:
-        con.execute("UPDATE hydrotech_quotes SET pdf_filename=? WHERE id=?", (pdf_filename, quote_id))
+        con.execute("INSERT INTO hydrotech_quote_pdfs (quote_id, pdf_filename) VALUES (?,?)", (quote_id, pdf_filename))
     return {"ok": True, "pdf_filename": pdf_filename}
+
+@app.delete("/api/hydrotech-pdfs/{pdf_id}")
+def delete_hydrotech_pdf(pdf_id: int):
+    """Delete a single PDF attachment from a Hydrotech quote."""
+    with get_db() as con:
+        row = con.execute("SELECT pdf_filename FROM hydrotech_quote_pdfs WHERE id=?", (pdf_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "PDF not found")
+        pdf_path = os.path.join(DATA_DIR, "hydrotech_pdfs", row["pdf_filename"])
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+        con.execute("DELETE FROM hydrotech_quote_pdfs WHERE id=?", (pdf_id,))
+    return {"ok": True}
 
 @app.get("/api/hydrotech-pdf/{filename}")
 def serve_hydrotech_pdf(filename: str):
@@ -1345,9 +1397,9 @@ def hydrotech_sync():
                                 pdf_path = os.path.join(DATA_DIR, "hydrotech_pdfs", pdf_filename)
                                 with open(pdf_path, "wb") as pf:
                                     pf.write(pdf_bytes)
-                                con.execute("UPDATE hydrotech_quotes SET pdf_filename=? WHERE id=?",
-                                            (pdf_filename, new_id))
-                                break  # save only first PDF
+                                con.execute("INSERT INTO hydrotech_quote_pdfs (quote_id, pdf_filename) VALUES (?,?)",
+                                            (new_id, pdf_filename))
+                                # continue loop to save ALL PDF attachments (not just first)
                 except Exception:
                     pass  # don't fail the import if PDF save fails
 
