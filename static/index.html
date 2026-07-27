@@ -1563,8 +1563,8 @@ function App() {
   const [splashVisible, setSplashVisible] = useState(true);
   const [splashFading,  setSplashFading]  = useState(false);
   React.useEffect(() => {
-    const t1 = setTimeout(() => setSplashFading(true),  4000);
-    const t2 = setTimeout(() => setSplashVisible(false), 4800);
+    const t1 = setTimeout(() => setSplashFading(true),  6000);
+    const t2 = setTimeout(() => setSplashVisible(false), 6800);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
   const [tab, setTab]         = useState('sales');
