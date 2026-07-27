@@ -38,6 +38,9 @@
   .tab-active { background:#1d4ed8;color:#fff; }
   .tab-inactive { color:#64748b; }
   .tab-inactive:hover { background:#e2e8f0; }
+  /* ── Splash ── */
+  .splash { position:fixed;inset:0;background:#1F4E79;display:flex;align-items:center;justify-content:center;z-index:9999;transition:opacity 0.8s ease; }
+  .splash.fade-out { opacity:0;pointer-events:none; }
   /* ── Mobile ── */
   .tabs-scroll { overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none; }
   .tabs-scroll::-webkit-scrollbar { display:none; }
@@ -1544,6 +1547,13 @@ function CustomerDirectory() {
 
 // ── App shell ─────────────────────────────────────────────────────────────────
 function App() {
+  const [splashVisible, setSplashVisible] = useState(true);
+  const [splashFading,  setSplashFading]  = useState(false);
+  React.useEffect(() => {
+    const t1 = setTimeout(() => setSplashFading(true),  2500);
+    const t2 = setTimeout(() => setSplashVisible(false), 3300);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
   const [tab, setTab]         = useState('sales');
   const [modal, setModal]     = useState(null);
   const [modalCfg, setModalCfg] = useState(RMAX_CFG);
@@ -1591,6 +1601,14 @@ function App() {
   }
 
   return React.createElement('div', {className:'min-h-screen'},
+    // Splash screen
+    splashVisible && React.createElement('div', {className:'splash' + (splashFading ? ' fade-out' : '')},
+      React.createElement('img', {
+        src: '/static/splash-logo.svg',
+        alt: 'SPECFORM',
+        style: {width: 'min(80vw, 600px)', height: 'auto'}
+      })
+    ),
     // Header
     React.createElement('header', {className:'bg-[#1F4E79] text-white shadow'},
       React.createElement('div', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between'},
