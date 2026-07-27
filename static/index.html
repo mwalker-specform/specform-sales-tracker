@@ -753,16 +753,15 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
   );
 }
 
-// ── Layout Test tab (RMAX data, experimental table layout) ────────────────────
+// ── Layout Test tab (RMAX data, compact 2-column card grid) ───────────────────
 function QuoteListTest({ onEdit, refresh }) {
   const [quotes, setQuotes]       = useState([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
-  const [statusFilter, setStatus] = useState('All');
   const [regionFilter, setRegion] = useState('All');
-  const STATUSES = ['All','Open','Won','Lost','No Decision'];
-  const REGIONS  = ['All','Central Texas','Southeast Texas','The Valley'];
-  const STATUS_COLORS = {Open:'#2563eb',Won:'#16a34a',Lost:'#dc2626','No Decision':'#9ca3af'};
+  const REGIONS = ['All','Central Texas','Southeast Texas','The Valley'];
+  const STATUS_COLORS = {Open:'#2563eb',Won:'#16a34a',Lost:'#dc2626','No Decision':'#6b7280'};
+  const STATUS_BG     = {Open:'#eff6ff',Won:'#f0fdf4',Lost:'#fef2f2','No Decision':'#f9fafb'};
 
   const load = () => {
     setLoading(true);
@@ -770,91 +769,124 @@ function QuoteListTest({ onEdit, refresh }) {
   };
   useEffect(() => { load(); }, [refresh]);
 
+  const fmtAmt  = v => v != null && v !== '' ? '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : null;
+  const fmtDate = s => { if (!s) return null; const d = new Date(s+'T00:00:00'); return isNaN(d)?s:d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
+
   const visible = quotes.filter(q => {
-    if (statusFilter !== 'All' && q.status !== statusFilter) return false;
     if (regionFilter !== 'All' && ((q.region||'').trim()||'(No Region)') !== regionFilter) return false;
     if (search) {
       const s = search.toLowerCase();
-      return ['customer','location','job_name','sent_to','subject'].some(k => (q[k]||'').toLowerCase().includes(s));
+      return ['customer','location','job_name','sent_to','subject','product'].some(k => (q[k]||'').toLowerCase().includes(s));
     }
     return true;
   });
 
-  const fmtAmt = v => v != null && v !== '' ? '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
-  const fmtDate = s => { if (!s) return '—'; const d = new Date(s+'T00:00:00'); return isNaN(d)?s:d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}); };
+  // Group by region then sort Open first
+  const REGION_ORDER = ['Central Texas','Southeast Texas','The Valley','(No Region)'];
+  const grouped = {};
+  visible.forEach(q => {
+    const r = (q.region||'').trim() || '(No Region)';
+    if (!grouped[r]) grouped[r] = [];
+    grouped[r].push(q);
+  });
+  const STATUS_ORDER = {Open:0,Won:1,Lost:2,'No Decision':3};
+  Object.values(grouped).forEach(arr => arr.sort((a,b) => (STATUS_ORDER[a.status]??9)-(STATUS_ORDER[b.status]??9)));
 
   return React.createElement('div', null,
-    // ── Toolbar ──────────────────────────────────────────────────────────────
-    React.createElement('div', {className:'flex flex-wrap gap-2 mb-3 items-center'},
+    // Toolbar
+    React.createElement('div', {className:'flex flex-wrap gap-2 mb-4 items-center'},
       React.createElement('input', {
-        type:'text', placeholder:'Search…', value:search,
+        type:'text', placeholder:'Search customer, job, location…', value:search,
         onChange: e => setSearch(e.target.value),
-        className:'border border-gray-300 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-0',
-        style:{maxWidth:'260px'}
+        className:'border border-gray-300 rounded-lg px-3 py-1.5 text-sm',
+        style:{minWidth:'240px'}
       }),
-      React.createElement('select', {
-        value:statusFilter, onChange:e=>setStatus(e.target.value),
-        className:'border border-gray-300 rounded-lg px-2 py-1.5 text-sm'
-      }, STATUSES.map(s => React.createElement('option',{key:s,value:s},s))),
-      React.createElement('select', {
-        value:regionFilter, onChange:e=>setRegion(e.target.value),
-        className:'border border-gray-300 rounded-lg px-2 py-1.5 text-sm'
-      }, REGIONS.map(r => React.createElement('option',{key:r,value:r},r))),
-      React.createElement('span', {className:'text-sm text-gray-400 ml-1'}, `${visible.length} quote${visible.length!==1?'s':''}`)
+      REGIONS.map(r => React.createElement('button', {
+        key:r,
+        onClick: () => setRegion(r),
+        className:'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+        style: regionFilter===r ? {background:'#1F4E79',color:'#fff'} : {background:'#e2e8f0',color:'#374151'}
+      }, r)),
+      React.createElement('span', {className:'text-sm text-gray-400 ml-auto'}, `${visible.length} quote${visible.length!==1?'s':''}`)
     ),
-    // ── Table ─────────────────────────────────────────────────────────────────
+
     loading ? React.createElement('div',{className:'text-center py-12 text-gray-400'},'Loading…')
-    : React.createElement('div', {style:{overflowX:'auto'}},
-      React.createElement('table', {style:{width:'100%',borderCollapse:'collapse',fontSize:'13px'}},
-        React.createElement('thead', null,
-          React.createElement('tr', {style:{background:'#f8fafc',borderBottom:'2px solid #e2e8f0'}},
-            ['Status','Date Rcvd','Customer','Location','Job Name','Product','Qty','Amount','Close Date','Region'].map(h =>
-              React.createElement('th', {key:h, style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'#64748b',whiteSpace:'nowrap',fontSize:'11px',textTransform:'uppercase',letterSpacing:'0.04em'}}, h)
-            )
-          )
-        ),
-        React.createElement('tbody', null,
-          visible.length === 0
-            ? React.createElement('tr', null, React.createElement('td',{colSpan:10,style:{padding:'32px',textAlign:'center',color:'#9ca3af'}},'No quotes found'))
-            : visible.map((q,i) =>
-              React.createElement('tr', {
-                key: q.id,
-                onClick: () => onEdit && onEdit(q),
-                style:{
-                  background: i%2===0?'#fff':'#f9fafb',
-                  borderBottom:'1px solid #f1f5f9',
-                  cursor:'pointer',
-                  transition:'background 0.1s'
+    : visible.length === 0 ? React.createElement('div',{className:'text-center py-12 text-gray-400'},'No quotes found')
+    : React.createElement('div', null,
+        REGION_ORDER.filter(r => grouped[r]).map(region =>
+          React.createElement('div', {key:region, className:'mb-8'},
+            // Region header
+            React.createElement('div', {style:{
+              display:'flex',alignItems:'center',gap:'10px',marginBottom:'12px',
+              paddingBottom:'8px',borderBottom:'2px solid #1F4E79'
+            }},
+              React.createElement('span', {style:{fontWeight:700,fontSize:'15px',color:'#1F4E79',textTransform:'uppercase',letterSpacing:'0.05em'}}, region),
+              React.createElement('span', {style:{fontSize:'12px',color:'#94a3b8',fontWeight:500}}, `${grouped[region].length} quote${grouped[region].length!==1?'s':''}`)
+            ),
+            // 2-column card grid
+            React.createElement('div', {style:{
+              display:'grid',
+              gridTemplateColumns:'repeat(auto-fill,minmax(380px,1fr))',
+              gap:'12px'
+            }},
+              grouped[region].map(q =>
+                React.createElement('div', {
+                  key:q.id,
+                  onClick: () => onEdit && onEdit(q),
+                  style:{
+                    background:'#fff',
+                    border:'1px solid #e2e8f0',
+                    borderLeft:`4px solid ${STATUS_COLORS[q.status]||'#cbd5e1'}`,
+                    borderRadius:'10px',
+                    padding:'14px 16px',
+                    cursor:'pointer',
+                    transition:'box-shadow 0.15s,transform 0.1s',
+                    boxShadow:'0 1px 3px rgba(0,0,0,0.06)'
+                  },
+                  onMouseEnter: e => { e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.12)'; e.currentTarget.style.transform='translateY(-1px)'; },
+                  onMouseLeave: e => { e.currentTarget.style.boxShadow='0 1px 3px rgba(0,0,0,0.06)'; e.currentTarget.style.transform=''; }
                 },
-                onMouseEnter: e => e.currentTarget.style.background='#eff6ff',
-                onMouseLeave: e => e.currentTarget.style.background=i%2===0?'#fff':'#f9fafb'
-              },
-                // Status
-                React.createElement('td', {style:{padding:'8px 10px',whiteSpace:'nowrap'}},
-                  React.createElement('span', {style:{
-                    display:'inline-flex',alignItems:'center',gap:'5px',
-                    padding:'2px 8px',borderRadius:'99px',fontSize:'11px',fontWeight:600,
-                    background: STATUS_COLORS[q.status]+'18' || '#f3f4f6',
-                    color: STATUS_COLORS[q.status] || '#374151'
-                  }},
-                    React.createElement('span',{style:{width:'6px',height:'6px',borderRadius:'50%',background:STATUS_COLORS[q.status]||'#9ca3af',flexShrink:0}}),
-                    q.status || '—'
+                  // Top row: customer + status badge
+                  React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'8px'}},
+                    React.createElement('div', null,
+                      React.createElement('div', {style:{fontWeight:700,fontSize:'14px',color:'#0f172a',lineHeight:1.3}}, q.customer||'(No Customer)'),
+                      q.location ? React.createElement('div', {style:{fontSize:'12px',color:'#64748b',marginTop:'2px'}}, q.location) : null
+                    ),
+                    React.createElement('span', {style:{
+                      fontSize:'11px',fontWeight:600,padding:'3px 8px',borderRadius:'99px',whiteSpace:'nowrap',flexShrink:0,marginLeft:'8px',
+                      background: STATUS_BG[q.status]||'#f1f5f9',
+                      color: STATUS_COLORS[q.status]||'#64748b',
+                      border: `1px solid ${STATUS_COLORS[q.status]||'#cbd5e1'}30`
+                    }}, q.status||'—')
+                  ),
+                  // Job name
+                  q.job_name ? React.createElement('div', {style:{fontSize:'13px',color:'#334155',marginBottom:'8px',fontStyle:'italic'}}, q.job_name) : null,
+                  // Key metrics row
+                  React.createElement('div', {style:{display:'flex',gap:'16px',flexWrap:'wrap',marginBottom:'6px'}},
+                    fmtAmt(q.amount) ? React.createElement('div', null,
+                      React.createElement('div',{style:{fontSize:'10px',color:'#94a3b8',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em'}},'Amount'),
+                      React.createElement('div',{style:{fontSize:'15px',fontWeight:700,color:'#1d4ed8'}}, fmtAmt(q.amount))
+                    ) : null,
+                    fmtDate(q.close_date) ? React.createElement('div', null,
+                      React.createElement('div',{style:{fontSize:'10px',color:'#94a3b8',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em'}},'Close'),
+                      React.createElement('div',{style:{fontSize:'13px',fontWeight:500,color:'#374151'}}, fmtDate(q.close_date))
+                    ) : null,
+                    fmtDate(q.date_received) ? React.createElement('div', null,
+                      React.createElement('div',{style:{fontSize:'10px',color:'#94a3b8',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em'}},'Received'),
+                      React.createElement('div',{style:{fontSize:'13px',color:'#64748b'}}, fmtDate(q.date_received))
+                    ) : null
+                  ),
+                  // Product + sent to
+                  React.createElement('div', {style:{display:'flex',gap:'8px',flexWrap:'wrap',marginTop:'4px'}},
+                    q.product ? React.createElement('span',{style:{fontSize:'11px',background:'#f1f5f9',color:'#475569',padding:'2px 7px',borderRadius:'4px'}}, q.product) : null,
+                    q.sent_to ? React.createElement('span',{style:{fontSize:'11px',color:'#94a3b8'}}, `→ ${q.sent_to}`) : null
                   )
-                ),
-                React.createElement('td',{style:{padding:'8px 10px',whiteSpace:'nowrap',color:'#64748b'}}, fmtDate(q.date_received)),
-                React.createElement('td',{style:{padding:'8px 10px',fontWeight:500,maxWidth:'160px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.customer||'—'),
-                React.createElement('td',{style:{padding:'8px 10px',color:'#64748b',whiteSpace:'nowrap'}}, q.location||'—'),
-                React.createElement('td',{style:{padding:'8px 10px',maxWidth:'180px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.job_name||'—'),
-                React.createElement('td',{style:{padding:'8px 10px',color:'#64748b',maxWidth:'140px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.product||'—'),
-                React.createElement('td',{style:{padding:'8px 10px',color:'#64748b',whiteSpace:'nowrap'}}, q.quantities||'—'),
-                React.createElement('td',{style:{padding:'8px 10px',fontWeight:600,whiteSpace:'nowrap',color:'#1d4ed8'}}, fmtAmt(q.amount)),
-                React.createElement('td',{style:{padding:'8px 10px',whiteSpace:'nowrap',color:'#64748b'}}, fmtDate(q.close_date)),
-                React.createElement('td',{style:{padding:'8px 10px',color:'#64748b',whiteSpace:'nowrap'}}, q.region||'—')
+                )
               )
             )
+          )
         )
       )
-    )
   );
 }
 
