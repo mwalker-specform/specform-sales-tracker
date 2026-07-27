@@ -136,6 +136,7 @@ const HYDROTECH_CFG = {
   dashboardBase: '/api/hydrotech-dashboard',
   label:         'Hydrotech',
   color:         '#16a34a',
+  regions:       ['Southeast Texas'],
 };
 const GLASSWORKS_CFG = {
   quotesBase:    '/api/glassworks-quotes',
@@ -423,7 +424,7 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
   const [salesforceOnly, setSalesforceOnly] = useState(false);
   const [pdfUploading, setPdfUploading] = useState({});
   const searchRef = useRef();
-  const QUOTE_REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
+  const QUOTE_REGION_ORDER = cfg.regions || ['Central Texas','Southeast Texas','The Valley'];
 
   // silent=true → update quotes in place without showing spinner
   const load = useCallback(async (silent = false) => {
@@ -1152,6 +1153,13 @@ function CustomerDirectory() {
   }
 
   useEffect(() => { loadContacts(); }, [filter, search]);
+
+  // Auto-import contacts from quotes silently on every tab open
+  useEffect(() => {
+    apiFetch('/api/contacts/import-from-quotes', {method:'POST'})
+      .then(() => loadContacts())
+      .catch(() => {});
+  }, []);
 
   function handleImport() {
     setImporting(true);
