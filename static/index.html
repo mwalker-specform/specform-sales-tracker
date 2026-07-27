@@ -421,6 +421,7 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
   const [regionFilter, setRegionFilter] = useState('All');
   const [deleting, setDeleting]         = useState(null);
   const [salesforceOnly, setSalesforceOnly] = useState(false);
+  const [pdfUploading, setPdfUploading] = useState({});
   const searchRef = useRef();
   const QUOTE_REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
 
@@ -678,17 +679,44 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
                     F('Notes', q.notes)
                   ) : null,
                   // PDF attachment (Hydrotech only)
-                  q.pdf_filename ? React.createElement('div', {className:'mt-3'},
-                    React.createElement('a', {
+                  cfg.label === 'Hydrotech' ? React.createElement('div', {className:'mt-3', style:{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}},
+                    q.pdf_filename ? React.createElement('a', {
                       href: `/api/hydrotech-pdf/${encodeURIComponent(q.pdf_filename)}`,
                       target: '_blank',
                       rel: 'noopener noreferrer',
                       onClick: e => e.stopPropagation(),
                       className: 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white',
                       style: {background: '#16a34a'}
-                    },
-                      '📄 View PDF Quote'
-                    )
+                    }, '📄 View PDF Quote') : null,
+                    // Hidden file input for PDF upload
+                    React.createElement('input', {
+                      type: 'file',
+                      accept: 'application/pdf',
+                      id: `pdf-upload-${q.id}`,
+                      style: {display:'none'},
+                      onClick: e => e.stopPropagation(),
+                      onChange: async e => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        e.stopPropagation();
+                        setPdfUploading(u => ({...u, [q.id]: true}));
+                        try {
+                          const fd = new FormData();
+                          fd.append('file', file);
+                          const r = await fetch(`/api/hydrotech-quotes/${q.id}/upload-pdf`, {method:'POST', body: fd});
+                          if (r.ok) { onRefresh && onRefresh(); }
+                          else { alert('Upload failed'); }
+                        } catch(err) { alert('Upload error: ' + err.message); }
+                        finally { setPdfUploading(u => ({...u, [q.id]: false})); e.target.value=''; }
+                      }
+                    }),
+                    // Attach / Replace PDF button
+                    React.createElement('button', {
+                      onClick: e => { e.stopPropagation(); document.getElementById(`pdf-upload-${q.id}`).click(); },
+                      disabled: pdfUploading[q.id],
+                      className: 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium',
+                      style: {background:'#f3f4f6', color:'#374151', border:'1px solid #d1d5db', cursor:'pointer'}
+                    }, pdfUploading[q.id] ? '⏳ Uploading…' : (q.pdf_filename ? '🔄 Replace PDF' : '📎 Attach PDF'))
                   ) : null
                 );
               })
