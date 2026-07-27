@@ -753,6 +753,111 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
   );
 }
 
+// ── Layout Test tab (RMAX data, experimental table layout) ────────────────────
+function QuoteListTest({ onEdit, refresh }) {
+  const [quotes, setQuotes]       = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [search, setSearch]       = useState('');
+  const [statusFilter, setStatus] = useState('All');
+  const [regionFilter, setRegion] = useState('All');
+  const STATUSES = ['All','Open','Won','Lost','No Decision'];
+  const REGIONS  = ['All','Central Texas','Southeast Texas','The Valley'];
+  const STATUS_COLORS = {Open:'#2563eb',Won:'#16a34a',Lost:'#dc2626','No Decision':'#9ca3af'};
+
+  const load = () => {
+    setLoading(true);
+    apiFetch('/api/quotes').then(d => { setQuotes(d); setLoading(false); }).catch(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, [refresh]);
+
+  const visible = quotes.filter(q => {
+    if (statusFilter !== 'All' && q.status !== statusFilter) return false;
+    if (regionFilter !== 'All' && ((q.region||'').trim()||'(No Region)') !== regionFilter) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      return ['customer','location','job_name','sent_to','subject'].some(k => (q[k]||'').toLowerCase().includes(s));
+    }
+    return true;
+  });
+
+  const fmtAmt = v => v != null && v !== '' ? '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
+  const fmtDate = s => { if (!s) return '—'; const d = new Date(s+'T00:00:00'); return isNaN(d)?s:d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}); };
+
+  return React.createElement('div', null,
+    // ── Toolbar ──────────────────────────────────────────────────────────────
+    React.createElement('div', {className:'flex flex-wrap gap-2 mb-3 items-center'},
+      React.createElement('input', {
+        type:'text', placeholder:'Search…', value:search,
+        onChange: e => setSearch(e.target.value),
+        className:'border border-gray-300 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-0',
+        style:{maxWidth:'260px'}
+      }),
+      React.createElement('select', {
+        value:statusFilter, onChange:e=>setStatus(e.target.value),
+        className:'border border-gray-300 rounded-lg px-2 py-1.5 text-sm'
+      }, STATUSES.map(s => React.createElement('option',{key:s,value:s},s))),
+      React.createElement('select', {
+        value:regionFilter, onChange:e=>setRegion(e.target.value),
+        className:'border border-gray-300 rounded-lg px-2 py-1.5 text-sm'
+      }, REGIONS.map(r => React.createElement('option',{key:r,value:r},r))),
+      React.createElement('span', {className:'text-sm text-gray-400 ml-1'}, `${visible.length} quote${visible.length!==1?'s':''}`)
+    ),
+    // ── Table ─────────────────────────────────────────────────────────────────
+    loading ? React.createElement('div',{className:'text-center py-12 text-gray-400'},'Loading…')
+    : React.createElement('div', {style:{overflowX:'auto'}},
+      React.createElement('table', {style:{width:'100%',borderCollapse:'collapse',fontSize:'13px'}},
+        React.createElement('thead', null,
+          React.createElement('tr', {style:{background:'#f8fafc',borderBottom:'2px solid #e2e8f0'}},
+            ['Status','Date Rcvd','Customer','Location','Job Name','Product','Qty','Amount','Close Date','Region'].map(h =>
+              React.createElement('th', {key:h, style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'#64748b',whiteSpace:'nowrap',fontSize:'11px',textTransform:'uppercase',letterSpacing:'0.04em'}}, h)
+            )
+          )
+        ),
+        React.createElement('tbody', null,
+          visible.length === 0
+            ? React.createElement('tr', null, React.createElement('td',{colSpan:10,style:{padding:'32px',textAlign:'center',color:'#9ca3af'}},'No quotes found'))
+            : visible.map((q,i) =>
+              React.createElement('tr', {
+                key: q.id,
+                onClick: () => onEdit && onEdit(q),
+                style:{
+                  background: i%2===0?'#fff':'#f9fafb',
+                  borderBottom:'1px solid #f1f5f9',
+                  cursor:'pointer',
+                  transition:'background 0.1s'
+                },
+                onMouseEnter: e => e.currentTarget.style.background='#eff6ff',
+                onMouseLeave: e => e.currentTarget.style.background=i%2===0?'#fff':'#f9fafb'
+              },
+                // Status
+                React.createElement('td', {style:{padding:'8px 10px',whiteSpace:'nowrap'}},
+                  React.createElement('span', {style:{
+                    display:'inline-flex',alignItems:'center',gap:'5px',
+                    padding:'2px 8px',borderRadius:'99px',fontSize:'11px',fontWeight:600,
+                    background: STATUS_COLORS[q.status]+'18' || '#f3f4f6',
+                    color: STATUS_COLORS[q.status] || '#374151'
+                  }},
+                    React.createElement('span',{style:{width:'6px',height:'6px',borderRadius:'50%',background:STATUS_COLORS[q.status]||'#9ca3af',flexShrink:0}}),
+                    q.status || '—'
+                  )
+                ),
+                React.createElement('td',{style:{padding:'8px 10px',whiteSpace:'nowrap',color:'#64748b'}}, fmtDate(q.date_received)),
+                React.createElement('td',{style:{padding:'8px 10px',fontWeight:500,maxWidth:'160px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.customer||'—'),
+                React.createElement('td',{style:{padding:'8px 10px',color:'#64748b',whiteSpace:'nowrap'}}, q.location||'—'),
+                React.createElement('td',{style:{padding:'8px 10px',maxWidth:'180px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.job_name||'—'),
+                React.createElement('td',{style:{padding:'8px 10px',color:'#64748b',maxWidth:'140px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.product||'—'),
+                React.createElement('td',{style:{padding:'8px 10px',color:'#64748b',whiteSpace:'nowrap'}}, q.quantities||'—'),
+                React.createElement('td',{style:{padding:'8px 10px',fontWeight:600,whiteSpace:'nowrap',color:'#1d4ed8'}}, fmtAmt(q.amount)),
+                React.createElement('td',{style:{padding:'8px 10px',whiteSpace:'nowrap',color:'#64748b'}}, fmtDate(q.close_date)),
+                React.createElement('td',{style:{padding:'8px 10px',color:'#64748b',whiteSpace:'nowrap'}}, q.region||'—')
+              )
+            )
+        )
+      )
+    )
+  );
+}
+
 // ── SPECFORM Overall Sales tab ────────────────────────────────────────────────
 const PRODUCT_COLORS = {
   'RMAX':                '#1d4ed8',
@@ -1740,6 +1845,11 @@ function App() {
           onClick:()=>setTab('glassworks')
         }, '🪟 Glassworks Quotes'),
         React.createElement('button', {
+          className:`tab ${tab==='test'?'tab-active':'tab-inactive'}`,
+          style: tab==='test' ? {background:'#7c3aed'} : {},
+          onClick:()=>setTab('test')
+        }, '🧪 Layout Test'),
+        React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           style:{marginLeft:'auto'},
           onClick:()=>setTab('sales')
@@ -1750,6 +1860,7 @@ function App() {
     // Content
     React.createElement('main', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-6'},
       tab === 'dashboard' ? React.createElement(Dashboard, {key:refresh})
+      : tab === 'test'       ? React.createElement(QuoteListTest, {key:'test', refresh, onEdit: q => openEdit(q, RMAX_CFG)})
       : tab === 'sales'      ? React.createElement(SalesTab)
       : tab === 'directory'  ? React.createElement(CustomerDirectory, {key:'dir'})
       : tab === 'hydrotech' ? React.createElement(QuoteList, {
