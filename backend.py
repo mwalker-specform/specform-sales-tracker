@@ -1286,12 +1286,9 @@ def hydrotech_sync():
     inserted = updated = skipped = 0
     with get_db() as con:
         for msg in msgs:
-            to_recipients = msg.get("toRecipients", [])
-            if to_recipients:
-                first_to = to_recipients[0].get("emailAddress", {})
-                sent_to  = (first_to.get("name") or first_to.get("address") or "").strip()
-            else:
-                sent_to  = ""
+            # For Hydrotech, the customer is the *sender* of the incoming quote request
+            from_addr = msg.get("from", {}).get("emailAddress", {})
+            sent_to   = (from_addr.get("address") or from_addr.get("name") or "").strip()
 
             subject       = (msg.get("subject") or "").strip()
             received_raw  = msg.get("receivedDateTime", "")

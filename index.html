@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>SPECFORM Sales Tracker</title>
+<title>SPECFORM SalesPartner</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Montserrat:wght@400;700;900&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
@@ -37,6 +38,9 @@
   .tab-active { background:#1d4ed8;color:#fff; }
   .tab-inactive { color:#64748b; }
   .tab-inactive:hover { background:#e2e8f0; }
+  /* ── Splash ── */
+  .splash { position:fixed;inset:0;background:#1F4E79;display:flex;align-items:center;justify-content:center;z-index:9999;transition:opacity 0.8s ease; }
+  .splash.fade-out { opacity:0;pointer-events:none; }
   /* ── Mobile ── */
   .tabs-scroll { overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none; }
   .tabs-scroll::-webkit-scrollbar { display:none; }
@@ -132,6 +136,14 @@ const HYDROTECH_CFG = {
   dashboardBase: '/api/hydrotech-dashboard',
   label:         'Hydrotech',
   color:         '#16a34a',
+};
+const GLASSWORKS_CFG = {
+  quotesBase:    '/api/glassworks-quotes',
+  exportUrl:     '/api/glassworks-quotes-export',
+  syncUrl:       '/api/glassworks-sync',
+  dashboardBase: '/api/glassworks-dashboard',
+  label:         'Glassworks',
+  color:         '#0e7490',
 };
 
 // ── Quote Modal ───────────────────────────────────────────────────────────────
@@ -240,11 +252,20 @@ function Dashboard() {
     ? new Date(selMonth + '-02').toLocaleDateString('en-US',{month:'long',year:'numeric'})
     : 'All Time';
 
+  const closureRate = (active.total_quotes || 0) > 0
+    ? ((active.won_count / active.total_quotes) * 100).toFixed(1) + '%'
+    : '—';
+  const dollarClosureRate = (active.total_amount || 0) > 0
+    ? ((active.won_amount / active.total_amount) * 100).toFixed(1) + '%'
+    : '—';
+
   const kpis = [
-    {label:'Total Quoted', value:fmt(active.total_amount),   sub:`${active.total_quotes} quotes`,         color:'#2563eb'},
-    {label:'Won',          value:fmt(active.won_amount),     sub:`${active.won_count} deals`,             color:'#16a34a'},
-    {label:'Verbal',       value:fmt(active.verbal_amount),  sub:`${active.verbal_count} pending`,        color:'#ca8a04'},
-    {label:'Lost',         value:fmt(active.lost_amount||0), sub:`${active.lost_count||0} lost`,          color:'#dc2626'},
+    {label:'Total Quoted',   value:fmt(active.total_amount),   sub:`${active.total_quotes} quotes`,                            color:'#2563eb'},
+    {label:'Won',            value:fmt(active.won_amount),     sub:`${active.won_count} deals`,                                color:'#16a34a'},
+    {label:'Verbal',         value:fmt(active.verbal_amount),  sub:`${active.verbal_count} pending`,                           color:'#ca8a04'},
+    {label:'Lost',           value:fmt(active.lost_amount||0), sub:`${active.lost_count||0} lost`,                             color:'#dc2626'},
+    {label:'Closure Rate',   value:closureRate,                sub:`${active.won_count} won of ${active.total_quotes} quoted`, color:'#7c3aed'},
+    {label:'$ Closure Rate', value:dollarClosureRate,          sub:`${fmt(active.won_amount)} of ${fmt(active.total_amount)}`, color:'#0891b2'},
   ];
 
   // Build a full 12-month rolling grid (past 6 + current + future 5) filled with data
@@ -288,7 +309,7 @@ function Dashboard() {
           })
         )
       ),
-      React.createElement('div', {className:'grid grid-cols-2 md:grid-cols-4 gap-4'},
+      React.createElement('div', {className:'grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4'},
         kpis.map(k => React.createElement('div', {key:k.label, className:'kpi-card', style:{borderLeftColor:k.color}},
           React.createElement('div', {className:'text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1'}, k.label),
           React.createElement('div', {className:'text-2xl font-bold text-gray-800'}, k.value),
@@ -392,19 +413,20 @@ function Dashboard() {
 // Normalize state abbreviations for grouping/filtering
 const normLoc = s => (s || '(No Location)').replace(/,?\s+([a-zA-Z]{2})$/, (_, st) => ', ' + st.toUpperCase());
 
-function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
+function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
   const { quotesBase, exportUrl, dashboardBase } = cfg;
   const [quotes, setQuotes]             = useState([]);
   const [loading, setLoading]           = useState(true);
   const [filters, setFilters]           = useState({status:'All', search:''});
   const [regionFilter, setRegionFilter] = useState('All');
   const [deleting, setDeleting]         = useState(null);
+  const [salesforceOnly, setSalesforceOnly] = useState(false);
+  const [pdfUploading, setPdfUploading] = useState({});
   const searchRef = useRef();
   const QUOTE_REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
 
-  // silent=true → update quotes in place without showing spinner or losing scroll
+  // silent=true → update quotes in place without showing spinner
   const load = useCallback(async (silent = false) => {
-    const savedScroll = window.scrollY;
     if (!silent) setLoading(true);
     const params = new URLSearchParams();
     if (filters.status !== 'All') params.set('status', filters.status);
@@ -412,7 +434,7 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
     const data = await apiFetch(quotesBase + '?' + params);
     setQuotes(data);
     if (!silent) setLoading(false);
-    if (silent) requestAnimationFrame(() => window.scrollTo(0, savedScroll));
+    // Scroll restore is handled by the caller (closeModal) — React itself doesn't reset scrollY
   }, [filters]);
 
   // Filter changes: full load with spinner
@@ -463,6 +485,18 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
             return `${count} quote${count!==1?'s':''}`;
           })()
         ),
+        cfg.label === 'RMAX' && React.createElement('button', {
+          className:'btn flex items-center gap-2',
+          style: salesforceOnly
+            ? {background:'#7c3aed', color:'#fff', border:'none'}
+            : {background:'#f3f4f6', color:'#374151', border:'1px solid #d1d5db'},
+          onClick: () => setSalesforceOnly(v => !v)
+        }, salesforceOnly ? '✓ Salesforce Queue' : '☁ Salesforce Queue'),
+        onNew && React.createElement('button', {
+          className:'btn flex items-center gap-2',
+          style:{background:'#1F4E79', color:'#fff', border:'none'},
+          onClick: onNew
+        }, '+ Create Quote'),
         React.createElement('button', {
           className:'btn flex items-center gap-2',
           style:{background:'#16a34a', color:'#fff', border:'none'},
@@ -502,10 +536,10 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
       if (quotes.length === 0) return React.createElement('p', {className:'text-center py-12 text-gray-400'}, 'No quotes found.');
 
 
-      // Apply region filter then group by region
-      const visibleQuotes = regionFilter === 'All'
-        ? quotes
-        : quotes.filter(q => ((q.region||'').trim()||'(No Region)') === regionFilter);
+      // Apply region filter + salesforce filter then group by region
+      const visibleQuotes = quotes
+        .filter(q => regionFilter === 'All' || ((q.region||'').trim()||'(No Region)') === regionFilter)
+        .filter(q => !salesforceOnly || q.add_to_salesforce);
 
       const grouped = {};
       visibleQuotes.forEach(q => {
@@ -553,25 +587,37 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
                   },
                   onClick: () => onEdit(q)
                 },
-                  // ⭐ Win star — top-left corner
+                  // ⭐ Win star — large, behind the "Won" badge
                   isWon && React.createElement('div', {
                     style:{
-                      position:'absolute', top:'-10px', left:'-10px',
-                      fontSize:'26px', lineHeight:1,
-                      filter:'drop-shadow(0 1px 2px rgba(0,0,0,0.25))',
-                      pointerEvents:'none', userSelect:'none'
+                      position:'absolute', top:'-8px', left:'-8px',
+                      fontSize:'90px', lineHeight:1, opacity:0.22,
+                      pointerEvents:'none', userSelect:'none', zIndex:0
                     }
                   }, '⭐'),
                   // Card header: status + job name + amount + delete
-                  React.createElement('div', {className:'flex items-start justify-between mb-3'},
-                    React.createElement('div', {className:'flex items-center gap-2 flex-wrap'},
-                      React.createElement(StatusBadge, {status: q.status}),
-                      React.createElement('span', {className:'font-bold text-gray-800'},
-                        React.createElement('span', {className:'font-normal text-gray-500'}, 'Job Name: '),
-                        q.job_name || q.subject || '—'
+                  React.createElement('div', {className:'mb-3', style:{position:'relative',zIndex:1}},
+                    // Row 1: status badge + job name + amount + delete
+                    React.createElement('div', {className:'flex items-start justify-between'},
+                      React.createElement('div', {className:'flex items-center gap-2 flex-wrap min-w-0 mr-2'},
+                        React.createElement(StatusBadge, {status: q.status}),
+                        React.createElement('span', {className:'font-bold text-gray-800 break-words'},
+                          React.createElement('span', {className:'font-normal text-gray-500'}, 'Job Name: '),
+                          q.job_name || q.subject || '—'
+                        )
                       ),
+                      React.createElement('div', {className:'flex items-center gap-3 shrink-0'},
+                        React.createElement('span', {className:'font-bold text-gray-700 whitespace-nowrap'}, fmt(q.amount)),
+                        React.createElement('button', {
+                          className:'text-gray-300 hover:text-red-500 text-xl leading-none',
+                          onClick: e => { e.stopPropagation(); setDeleting(q.id); }
+                        }, '×')
+                      )
+                    ),
+                    // Row 2: checkboxes on their own line
+                    React.createElement('div', {className:'flex flex-wrap items-center gap-x-4 gap-y-1 mt-1'},
                       React.createElement('label', {
-                        className:'flex items-center gap-1 text-xs text-gray-600 font-normal ml-2 cursor-pointer',
+                        className:'flex items-center gap-1 text-xs text-gray-600 font-normal cursor-pointer whitespace-nowrap',
                         onClick: e => e.stopPropagation()
                       },
                         React.createElement('input', {
@@ -585,7 +631,7 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
                         'Add to Salesforce'
                       ),
                       React.createElement('label', {
-                        className:'flex items-center gap-1 text-xs text-gray-600 font-normal cursor-pointer',
+                        className:'flex items-center gap-1 text-xs text-gray-600 font-normal cursor-pointer whitespace-nowrap',
                         onClick: e => e.stopPropagation()
                       },
                         React.createElement('input', {
@@ -598,20 +644,14 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
                         }),
                         'Completed'
                       )
-                    ),
-                    React.createElement('div', {className:'flex items-center gap-3 shrink-0 ml-4'},
-                      React.createElement('span', {className:'font-bold text-gray-700 whitespace-nowrap'}, fmt(q.amount)),
-                      React.createElement('button', {
-                        className:'text-gray-300 hover:text-red-500 text-xl leading-none',
-                        onClick: e => { e.stopPropagation(); setDeleting(q.id); }
-                      }, '×')
                     )
                   ),
-                  // Row 1: date received + sent to + customer
-                  React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2 mb-2'},
+                  // Row 1: date received + sent to + customer + location
+                  React.createElement('div', {className:'grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 mb-2'},
                     F('Date Received', fmtDate(q.date_received), {bold:true}),
                     F('Sent To',       q.sent_to, {bold:true}),
-                    F('Customer',      q.customer, {bold:true})
+                    F('Customer',      q.customer, {bold:true}),
+                    F('Location',      q.location, {bold:true})
                   ),
                   // Excel-style details table
                   React.createElement('div', {className:'mt-3 rounded border border-gray-300 overflow-x-auto text-xs'},
@@ -637,6 +677,46 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
                   // Notes (only if present)
                   q.notes ? React.createElement('div', {className:'mt-2'},
                     F('Notes', q.notes)
+                  ) : null,
+                  // PDF attachment (Hydrotech only)
+                  cfg.label === 'Hydrotech' ? React.createElement('div', {className:'mt-3', style:{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}},
+                    q.pdf_filename ? React.createElement('a', {
+                      href: `/api/hydrotech-pdf/${encodeURIComponent(q.pdf_filename)}`,
+                      target: '_blank',
+                      rel: 'noopener noreferrer',
+                      onClick: e => e.stopPropagation(),
+                      className: 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white',
+                      style: {background: '#16a34a'}
+                    }, '📄 View PDF Quote') : null,
+                    // Hidden file input for PDF upload
+                    React.createElement('input', {
+                      type: 'file',
+                      accept: 'application/pdf',
+                      id: `pdf-upload-${q.id}`,
+                      style: {display:'none'},
+                      onClick: e => e.stopPropagation(),
+                      onChange: async e => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        e.stopPropagation();
+                        setPdfUploading(u => ({...u, [q.id]: true}));
+                        try {
+                          const fd = new FormData();
+                          fd.append('file', file);
+                          const r = await fetch(`/api/hydrotech-quotes/${q.id}/upload-pdf`, {method:'POST', body: fd});
+                          if (r.ok) { onRefresh && onRefresh(); }
+                          else { alert('Upload failed'); }
+                        } catch(err) { alert('Upload error: ' + err.message); }
+                        finally { setPdfUploading(u => ({...u, [q.id]: false})); e.target.value=''; }
+                      }
+                    }),
+                    // Attach / Replace PDF button
+                    React.createElement('button', {
+                      onClick: e => { e.stopPropagation(); document.getElementById(`pdf-upload-${q.id}`).click(); },
+                      disabled: pdfUploading[q.id],
+                      className: 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium',
+                      style: {background:'#f3f4f6', color:'#374151', border:'1px solid #d1d5db', cursor:'pointer'}
+                    }, pdfUploading[q.id] ? '⏳ Uploading…' : (q.pdf_filename ? '🔄 Replace PDF' : '📎 Attach PDF'))
                   ) : null
                 );
               })
@@ -1072,6 +1152,13 @@ function CustomerDirectory() {
   }
 
   useEffect(() => { loadContacts(); }, [filter, search]);
+
+  // Auto-import contacts from quotes silently on every tab open
+  useEffect(() => {
+    apiFetch('/api/contacts/import-from-quotes', {method:'POST'})
+      .then(() => loadContacts())
+      .catch(() => {});
+  }, []);
 
   function handleImport() {
     setImporting(true);
@@ -1521,21 +1608,37 @@ function CustomerDirectory() {
 
 // ── App shell ─────────────────────────────────────────────────────────────────
 function App() {
-  const [tab, setTab]         = useState('quotes');
+  const [splashVisible, setSplashVisible] = useState(true);
+  const [splashFading,  setSplashFading]  = useState(false);
+  React.useEffect(() => {
+    const t1 = setTimeout(() => setSplashFading(true),  5000);
+    const t2 = setTimeout(() => setSplashVisible(false), 5800);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
+  const [tab, setTab]         = useState('sales');
   const [modal, setModal]     = useState(null);
   const [modalCfg, setModalCfg] = useState(RMAX_CFG);
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
-
-  function openEdit(q, cfg) { setModal(q); setModalCfg(cfg || RMAX_CFG); }
+  function openEdit(q, cfg) {
+    // Lock body scroll so nothing can jump while modal is open
+    const y = window.scrollY;
+    document.body.style.position = 'fixed';
+    document.body.style.top      = `-${y}px`;
+    document.body.style.width    = '100%';
+    setModal(q);
+    setModalCfg(cfg || RMAX_CFG);
+  }
   function closeModal(saved) {
-    const y = window.scrollY;          // capture before modal unmounts / focus shifts
+    // Restore body scroll before any React state changes
+    const y = Math.abs(parseInt(document.body.style.top || '0', 10));
+    document.body.style.position = '';
+    document.body.style.top      = '';
+    document.body.style.width    = '';
+    window.scrollTo(0, y);
     setModal(null);
     if (saved) setRefresh(r => r+1);
-    // Double-rAF: first frame lets React commit + browser process focus change,
-    // second frame runs after any browser-initiated scroll, then we restore.
-    requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
   }
 
   function doRefresh(cfg) {
@@ -1543,22 +1646,30 @@ function App() {
     setSyncMsg('');
     apiFetch(cfg.syncUrl, {method:'POST'})
       .then(data => {
-        setSyncMsg(data.inserted > 0
+        setSyncMsg(data.message || (data.inserted > 0
           ? `✓ ${data.inserted} new quote${data.inserted===1?'':'s'} imported`
-          : data.skipped > 0 ? '✓ Already up to date' : '✓ No new quotes');
+          : '✓ No new quotes'));
         setRefresh(r => r+1);
       })
-      .catch(() => {
-        setSyncMsg('Refresh failed');
+      .catch(e => {
+        setSyncMsg('Refresh failed: ' + e.message);
         setRefresh(r => r+1);
       })
       .finally(() => {
         setSyncing(false);
-        setTimeout(() => setSyncMsg(''), 4000);
+        setTimeout(() => setSyncMsg(''), 10000);
       });
   }
 
   return React.createElement('div', {className:'min-h-screen'},
+    // Splash screen
+    splashVisible && React.createElement('div', {className:'splash' + (splashFading ? ' fade-out' : '')},
+      React.createElement('img', {
+        src: '/static/splash-logo.svg',
+        alt: 'SPECFORM',
+        style: {width: 'min(80vw, 600px)', height: 'auto'}
+      })
+    ),
     // Header
     React.createElement('header', {className:'bg-[#1F4E79] text-white shadow'},
       React.createElement('div', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between'},
@@ -1567,7 +1678,7 @@ function App() {
           React.createElement('img', {src:'/static/logo.png', alt:'Specform Building Components', style:{height:'32px', flexShrink:0, filter:'brightness(0) invert(1)'}}),
           // RMAX Quote Tracker label
           React.createElement('div', {className:'border-l border-blue-400 pl-4 ml-1'},
-            React.createElement('div', {className:'text-base sm:text-lg font-bold tracking-tight leading-none'}, 'SPECFORM Sales Tracker')
+            React.createElement('div', {className:'text-base sm:text-lg font-bold tracking-tight leading-none'}, 'SPECFORM SalesPartner')
           )
         ),
         // Customer Directory button — far right of blue header
@@ -1588,7 +1699,10 @@ function App() {
         React.createElement('button', {
           className:`tab ${tab==='quotes'?'tab-active':'tab-inactive'}`,
           onClick:()=>setTab('quotes')
-        }, '📋 RMAX Quotes'),
+        }, React.createElement('span', {style:{display:'flex',alignItems:'center',gap:'6px'}},
+            React.createElement('img', {src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABoAAAAWCAYAAADeiIy1AAAEcElEQVR42r2VXYhVVRTHf2ufc8+9d+beGD8KCTIltFCMfJA+wLToYbCHULnj90hFVi8lGNZDcL1YERkyDAhpgqlj4txxMOihlNSnyIeI8KOECnOS/GAcZ+Z655x7z96rh3OpccYR66EF62GftfZZe6//f/23kJhQ6Db8V5tTUEooiPK/WKHbmyjkNxJyiJuNdYpnZVyW9RSwgIcXO6waPCNYT0kBpCz+yK90td0EldvdLClkawvINh9HQ0h2jjIF34CfgTgCvxkkArXgCTiAGOJMH4WuTsryMcWioVTSZHNiCS6iirMKzqJW//FYUXWgNWpDm9HwMaLKa2ArgEviVlEL6h4gO3kbha73KJXcWMxHLwRF4Ba3BE0Gaz+hvG4b3e0/0rNmJy5+Hz9rGu0UEHCxJbxhQd7hhT0zKLdZikVza+smtAZcYr6l0B0Q5DI0940w4H3f6MooPMXDOYefNgTxg8AFzs2Vuyykgiqoc/SsqgE1ANoOtKMag9hRMFj8IMDWBqnnzwBCueDuslDj0CIRha4VpHKzqFeeIMg/jyoEOR8UVEGMh6vXQF/lyLJ+Ct0eZbF3X0gERCNwKTL3bEWAcOg7hJ9AfVTSeL6Ad5G4eoDD639IWNdmx9P7jt1zoNpCuf0Qy/e+TpDbgfGngPsDkWOE4Wl61t74O7+ohpK4YhGzZQsqMhrM5fsXE2RPUI8cMpqJakk1e9QrBeb80kup5Fi2bwNNLTsb2EF9JAJ+x/hncXEv5dVdjTly4+ltXDL5QgzacOKEvhojqpRKSqE7S2/7LqKhfTgbUa9WwQUYMxuRpaTz+6Wwfyulknv509ZH3+15blZRiwZFkkLWTxE0e6SaA4K8n3jOx88mazVpQBnOuURizBHS+TR+pokgJ/hZMB5iDBqnNi7ZtvbxOTPCk0/OqmVKUnLd5YJJMEqZ89RubqYeDYHLNtQiAtOMYjHeKQDylRhEMQfPEg5sJ47SiFcFjVA1Rm/6Ns7V7p8yvCKfl0mXhtyHHccWnu6zgx8lN9J4Gl5mFcY8TM+6DnrWdSCpR0i3rMZWrmBtJ22HzkPtDIWun1HTi61Nx9BF0PQU4v1GaHdq6p6FQN+CmZd7L12DwVTLksuD3tVNrUevN1hnJoObT9PU+RQOOBQlO+kN6iOANw/kWYg/B/2iwZHl+Nl2st5LDFcPYrzd5JpjjaLjRPRsWHwq/ODLRduv9YXV7FTtRBG/QWGfaMgSDXeQzm9CPKj2l4A3UfERhsB7BvShxmxNJw5j/EpIaL4mm6+RyWW0cvUkR9uvT3tl18wruzdsuo2omgri/wmptwmHOwkH9lFeswXVfsRdRelH4w4IVkKwEmd3ABe50TSP3ORvEPmK6rWNpHMllne9dWUg93R6/Z4ZxROLfEiENZmjYtFwbm6actvImBczy9V768y44LP3xfAWDWztDPCn5pk6JctnrX0ALD18HzKSxQv6mXO2OnaWxgspKv86dodn/DY/mejbhDFpvDky5iDj8v8C1XIGwtU3gf0AAAAASUVORK5CYII=', height:'22', style:{objectFit:'contain'}}),
+            'RMAX Quotes'
+          )),
         React.createElement('button', {
           className:`tab ${tab==='dashboard'?'tab-active':'tab-inactive'}`,
           onClick:()=>setTab('dashboard')
@@ -1597,7 +1711,15 @@ function App() {
           className:`tab ${tab==='hydrotech'?'tab-active':'tab-inactive'}`,
           style: tab==='hydrotech' ? {background:'#16a34a'} : {},
           onClick:()=>setTab('hydrotech')
-        }, '💧 Hydrotech Quotes'),
+        }, React.createElement('span', {style:{display:'flex',alignItems:'center',gap:'6px'}},
+            React.createElement('img', {src:'data:image/png;base64,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', height:'22', style:{objectFit:'contain'}}),
+            'Hydrotech Quotes'
+          )),
+        React.createElement('button', {
+          className:`tab ${tab==='glassworks'?'tab-active':'tab-inactive'}`,
+          style: tab==='glassworks' ? {background:'#0e7490'} : {},
+          onClick:()=>setTab('glassworks')
+        }, '🪟 Glassworks Quotes'),
         React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           style:{marginLeft:'auto'},
@@ -1612,15 +1734,25 @@ function App() {
       : tab === 'sales'      ? React.createElement(SalesTab)
       : tab === 'directory'  ? React.createElement(CustomerDirectory, {key:'dir'})
       : tab === 'hydrotech' ? React.createElement(QuoteList, {
-          key: 'hydrotech-' + refresh,
+          key: 'hydrotech',
           refresh,
           onEdit: q => openEdit(q, HYDROTECH_CFG),
+          onNew: () => openEdit({}, HYDROTECH_CFG),
           onRefresh: () => doRefresh(HYDROTECH_CFG),
           syncing, syncMsg,
           cfg: HYDROTECH_CFG,
         })
+      : tab === 'glassworks' ? React.createElement(QuoteList, {
+          key: 'glassworks',
+          refresh,
+          onEdit: q => openEdit(q, GLASSWORKS_CFG),
+          onNew: () => openEdit({}, GLASSWORKS_CFG),
+          onRefresh: () => doRefresh(GLASSWORKS_CFG),
+          syncing, syncMsg,
+          cfg: GLASSWORKS_CFG,
+        })
       : React.createElement(QuoteList, {
-          key: 'rmax-' + refresh,
+          key: 'rmax',
           refresh,
           onEdit: q => openEdit(q, RMAX_CFG),
           onRefresh: () => doRefresh(RMAX_CFG),
