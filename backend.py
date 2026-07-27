@@ -38,7 +38,7 @@ def normalize_date(s: str) -> str:
     dt = parse_date(s)
     return dt.strftime('%Y-%m-%d') if dt else s
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -1033,11 +1033,14 @@ def init_hydrotech_db():
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
                                  ('region',            'TEXT'),
-                                 ('deleted',           'INTEGER DEFAULT 0')]:
+                                 ('deleted',           'INTEGER DEFAULT 0'),
+                                 ('pdf_filename',      'TEXT')]:
             try:
                 con.execute(f"ALTER TABLE hydrotech_quotes ADD COLUMN {col} {definition}")
             except Exception:
                 pass
+    # Ensure PDF storage directory exists
+    os.makedirs(os.path.join(DATA_DIR, "hydrotech_pdfs"), exist_ok=True)
 
 @app.get("/api/hydrotech-quotes")
 def list_hydrotech_quotes(
@@ -1107,6 +1110,31 @@ def delete_hydrotech_quote(quote_id: int):
     with get_db() as con:
         con.execute("UPDATE hydrotech_quotes SET deleted=1 WHERE id=?", (quote_id,))
         return {"ok": True}
+
+@app.post("/api/hydrotech-quotes/{quote_id}/upload-pdf")
+async def upload_hydrotech_pdf(quote_id: int, file: UploadFile):
+    """Manually attach a PDF to an existing Hydrotech quote."""
+    os.makedirs(os.path.join(DATA_DIR, "hydrotech_pdfs"), exist_ok=True)
+    safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in file.filename)
+    pdf_filename = f"{quote_id}_{safe_name}"
+    pdf_path = os.path.join(DATA_DIR, "hydrotech_pdfs", pdf_filename)
+    contents = await file.read()
+    with open(pdf_path, "wb") as f:
+        f.write(contents)
+    with get_db() as con:
+        con.execute("UPDATE hydrotech_quotes SET pdf_filename=? WHERE id=?", (pdf_filename, quote_id))
+    return {"ok": True, "pdf_filename": pdf_filename}
+
+@app.get("/api/hydrotech-pdf/{filename}")
+def serve_hydrotech_pdf(filename: str):
+    """Serve a saved Hydrotech quote PDF attachment."""
+    # Sanitize: no path traversal
+    safe = os.path.basename(filename)
+    pdf_path = os.path.join(DATA_DIR, "hydrotech_pdfs", safe)
+    if not os.path.exists(pdf_path):
+        raise HTTPException(404, "PDF not found")
+    return FileResponse(pdf_path, media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="{safe}"'})
 
 @app.get("/api/hydrotech-quotes-export")
 def export_hydrotech_quotes():
@@ -1241,7 +1269,7 @@ def hydrotech_sync():
     msgs = []
     next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
                 f"/mailFolders/{folder_id}/messages"
-                f"?$select=from,toRecipients,subject,receivedDateTime,body&$top=50")
+                f"?$select=id,from,toRecipients,subject,receivedDateTime,body,hasAttachments&$top=50")
     while next_url and len(msgs) < 200:
         try:
             r = _req.get(next_url, headers=hdrs, timeout=30)
@@ -1286,7 +1314,7 @@ def hydrotech_sync():
             content_type = msg.get("body", {}).get("contentType", "text")
             parsed = _parse_quote_email(subject, body_content, content_type)
 
-            con.execute("""
+            cur = con.execute("""
             INSERT INTO hydrotech_quotes
                 (date_received, sent_to, subject, job_name, customer, location,
                  product, price, quantities, amount, est_freight, lead_time)
@@ -1297,7 +1325,34 @@ def hydrotech_sync():
                 parsed.get('product'), parsed.get('price'), parsed.get('quantities'),
                 parsed.get('amount'), parsed.get('est_freight'), parsed.get('lead_time'),
             ))
+            new_id = cur.lastrowid
             inserted += 1
+
+            # ── Save PDF attachment if present ────────────────────────────────
+            if msg.get("hasAttachments") and msg.get("id"):
+                try:
+                    att_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                               f"/messages/{msg['id']}/attachments"
+                               f"?$select=name,contentType,contentBytes&$top=20")
+                    att_r = _req.get(att_url, headers=hdrs, timeout=30)
+                    if att_r.status_code == 200:
+                        for att in att_r.json().get("value", []):
+                            ct = (att.get("contentType") or "").lower()
+                            name = (att.get("name") or "attachment.pdf")
+                            if "pdf" in ct or name.lower().endswith(".pdf"):
+                                import base64 as _b64
+                                pdf_bytes = _b64.b64decode(att.get("contentBytes", ""))
+                                # Sanitize filename and prefix with quote id
+                                safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in name)
+                                pdf_filename = f"{new_id}_{safe_name}"
+                                pdf_path = os.path.join(DATA_DIR, "hydrotech_pdfs", pdf_filename)
+                                with open(pdf_path, "wb") as pf:
+                                    pf.write(pdf_bytes)
+                                con.execute("UPDATE hydrotech_quotes SET pdf_filename=? WHERE id=?",
+                                            (pdf_filename, new_id))
+                                break  # save only first PDF
+                except Exception:
+                    pass  # don't fail the import if PDF save fails
 
     parts = []
     if inserted: parts.append(f"{inserted} new quote{'' if inserted==1 else 's'} imported")
@@ -2019,4 +2074,7 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 @app.get("/{full_path:path}")
 def serve_spa(full_path: str):
-    return FileResponse(os.path.join(STATIC, "index.html"))
+    return FileResponse(
+        os.path.join(STATIC, "index.html"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
