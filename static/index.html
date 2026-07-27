@@ -663,6 +663,19 @@ function QuoteList({ onEdit, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CF
                   // Notes (only if present)
                   q.notes ? React.createElement('div', {className:'mt-2'},
                     F('Notes', q.notes)
+                  ) : null,
+                  // PDF attachment (Hydrotech only)
+                  q.pdf_filename ? React.createElement('div', {className:'mt-3'},
+                    React.createElement('a', {
+                      href: `/api/hydrotech-pdf/${encodeURIComponent(q.pdf_filename)}`,
+                      target: '_blank',
+                      rel: 'noopener noreferrer',
+                      onClick: e => e.stopPropagation(),
+                      className: 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white',
+                      style: {background: '#16a34a'}
+                    },
+                      '📄 View PDF Quote'
+                    )
                   ) : null
                 );
               })
