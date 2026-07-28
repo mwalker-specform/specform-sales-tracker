@@ -223,8 +223,9 @@ function Confirm({ message, onYes, onNo }) {
 // ── Dashboard view ────────────────────────────────────────────────────────────
 function Dashboard() {
   const [data, setData]                   = useState(null);
-  const [selMonth, setSelMonth]           = useState('all');
+  const [selMonth, setSelMonth]             = useState('all');
   const [selRegionMonth, setSelRegionMonth] = useState('avg');
+  const [selPipelineMonth, setSelPipelineMonth] = useState('all');
   useEffect(() => { apiFetch('/api/dashboard').then(setData).catch(console.error); }, []);
   if (!data) return React.createElement('div', {className:'p-8 text-gray-400'}, 'Loading…');
 
@@ -319,6 +320,30 @@ function Dashboard() {
     count: selRegionMonth === 'avg' ? (regionTotal[region] || 0) : (regionForMonth[region] || 0)
   }));
 
+  // Pipeline by Region chart data (amount-based, supports month filter)
+  const pipelineChartData = (() => {
+    const regionOrder = [
+      ...REGION_ORDER_D.filter(r => (by_region||[]).some(x => x.region === r || (r === '(No Region)' && x.region === '(No Region)'))),
+      ...(by_region||[]).map(x => x.region).filter(r => !REGION_ORDER_D.includes(r))
+    ];
+    if (selPipelineMonth === 'all') {
+      return (by_region || []).map(r => ({
+        region: r.region === '(No Region)' ? 'No Region' : r.region,
+        total: r.total, won: r.won, verbal: r.verbal
+      }));
+    }
+    const monthRows = rmData.filter(r => r.month === selPipelineMonth);
+    const byReg = {};
+    monthRows.forEach(r => { byReg[r.region] = r; });
+    const allPipelineRegions = [...new Set([...regionOrder, ...monthRows.map(r => r.region)])];
+    return allPipelineRegions.map(region => ({
+      region: region === '(No Region)' ? 'No Region' : region,
+      total:  (byReg[region] || {total:0}).total  || 0,
+      won:    (byReg[region] || {won:0}).won      || 0,
+      verbal: (byReg[region] || {verbal:0}).verbal || 0,
+    })).filter(r => r.total > 0 || r.won > 0 || r.verbal > 0);
+  })();
+
   return React.createElement('div', {className:'space-y-6'},
     // KPI row with month selector
     React.createElement('div', {className:'space-y-3'},
@@ -400,9 +425,23 @@ function Dashboard() {
     React.createElement('div', {className:'grid grid-cols-1 lg:grid-cols-2 gap-6'},
       // By region
       React.createElement('div', {className:'card'},
-        React.createElement('h3', {className:'font-semibold text-gray-700 mb-4'}, 'Pipeline by Region'),
+        React.createElement('div', {className:'flex items-center justify-between mb-4'},
+          React.createElement('h3', {className:'font-semibold text-gray-700'}, 'Pipeline by Region'),
+          React.createElement('select', {
+            value: selPipelineMonth,
+            onChange: e => setSelPipelineMonth(e.target.value),
+            style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
+                   background:'#fff', color:'#374151', cursor:'pointer', width:'150px'},
+          },
+            React.createElement('option', {value:'all'}, 'All Time'),
+            allMonthsRM.map(m => {
+              const label = new Date(m + '-02').toLocaleDateString('en-US',{month:'short',year:'numeric'});
+              return React.createElement('option', {key:m, value:m}, label);
+            })
+          )
+        ),
         React.createElement(ResponsiveContainer, {width:'100%', height:260},
-          React.createElement(BarChart, {data:(by_region||[]), layout:'vertical', margin:{top:5,right:10,left:110,bottom:5}},
+          React.createElement(BarChart, {data:pipelineChartData, layout:'vertical', margin:{top:5,right:10,left:110,bottom:5}},
             React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
             React.createElement(XAxis, {type:'number', tickFormatter:v=>'$'+Math.round(v/1000)+'k', tick:{fontSize:11}}),
             React.createElement(YAxis, {type:'category', dataKey:'region', tick:{fontSize:10}, width:110}),
