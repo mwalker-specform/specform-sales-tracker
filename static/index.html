@@ -1364,7 +1364,7 @@ function CustomerDirectory() {
     setImporting(true);
     apiFetch('/api/contacts/import-from-quotes', {method:'POST'})
       .then(data => {
-        setImportMsg(`✓ ${data.inserted} new contact${data.inserted===1?'':'s'} imported, ${data.skipped} already existed`);
+        setImportMsg(`✓ ${data.inserted} new, ${data.updated||0} updated, ${data.skipped} unchanged`);
         loadContacts();
       })
       .catch(() => setImportMsg('❌ Import failed'))
