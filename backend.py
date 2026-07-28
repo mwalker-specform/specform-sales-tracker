@@ -742,7 +742,7 @@ def dashboard():
 
         # By region and month — for regional monthly trends chart
         raw_rq = con.execute(
-            "SELECT date_received, region, amount FROM quotes WHERE (deleted IS NULL OR deleted=0) AND date_received IS NOT NULL AND date_received != ''"
+            "SELECT date_received, region, amount, status FROM quotes WHERE (deleted IS NULL OR deleted=0) AND date_received IS NOT NULL AND date_received != ''"
         ).fetchall()
         rm_acc = {}
         for row in raw_rq:
@@ -753,10 +753,17 @@ def dashboard():
             region = (row["region"] or '').strip() or '(No Region)'
             key    = (region, ym)
             if key not in rm_acc:
-                rm_acc[key] = {'region': region, 'month': ym, 'total': 0.0, 'count': 0}
-            rm_acc[key]['total'] += float(row["amount"] or 0)
+                rm_acc[key] = {'region': region, 'month': ym, 'total': 0.0, 'count': 0, 'won': 0.0, 'verbal': 0.0}
+            amt = float(row["amount"] or 0)
+            rm_acc[key]['total'] += amt
             rm_acc[key]['count'] += 1
-        by_region_month = [{'region': k[0], 'month': k[1], 'total': round(v['total'], 2), 'count': v['count']}
+            st = (row["status"] or '').strip()
+            if st == 'Won':
+                rm_acc[key]['won'] += amt
+            elif st == 'Verbal':
+                rm_acc[key]['verbal'] += amt
+        by_region_month = [{'region': k[0], 'month': k[1], 'total': round(v['total'], 2), 'count': v['count'],
+                            'won': round(v['won'], 2), 'verbal': round(v['verbal'], 2)}
                            for k, v in sorted(rm_acc.items())]
 
         # Distinct filter options
