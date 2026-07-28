@@ -763,9 +763,11 @@ function QuoteListTest({ onEdit, refresh }) {
   const [sortCol, setSortCol]   = useState('date_received');
   const [sortAsc, setSortAsc]   = useState(false);
 
-  const STATUS_COLORS = {Open:'#2563eb',Won:'#16a34a',Lost:'#dc2626','No Decision':'#6b7280'};
-  const STATUS_BG     = {Open:'#dbeafe',Won:'#dcfce7',Lost:'#fee2e2','No Decision':'#f3f4f6'};
-  const STATUSES = ['All','Open','Won','Lost','No Decision'];
+  const STATUS_COLORS = {Open:'#2563eb',Won:'#16a34a',Verbal:'#ca8a04',Lost:'#dc2626','Not Awarded':'#ea580c',Unlikely:'#7c3aed',Duplicate:'#6b7280','No Decision':'#6b7280'};
+  const STATUS_BG     = {Open:'#dbeafe',Won:'#dcfce7',Verbal:'#fef9c3',Lost:'#fee2e2','Not Awarded':'#ffedd5',Unlikely:'#ede9fe',Duplicate:'#f3f4f6','No Decision':'#f3f4f6'};
+  // Row background colors (whole row tint, matching RMAX Quotes tab)
+  const ROW_BG = {Won:'#dcfce7', Lost:'#fee2e2', Duplicate:'#f3f4f6'};
+  const STATUSES = ['All','Open','Won','Verbal','Lost','Not Awarded','Unlikely','Duplicate'];
   const REGIONS  = ['All','Central Texas','Southeast Texas','The Valley'];
 
   const load = () => {
@@ -878,13 +880,16 @@ function QuoteListTest({ onEdit, refresh }) {
                       React.createElement('td',{colSpan:COLS.length,style:{padding:'40px',textAlign:'center',color:'#94a3b8'}},'No quotes found')
                     )
                   : visible.map((q,i) => {
-                      const sc = STATUS_COLORS[q.status]||'#94a3b8';
-                      const bg = i%2===0 ? '#fff' : '#fafafa';
+                      const isDup = q.status === 'Duplicate';
+                      const sc  = STATUS_COLORS[q.status]||'#94a3b8';
+                      const bg  = ROW_BG[q.status] || (i%2===0 ? '#fff' : '#fafafa');
+                      const hoverBg = q.status==='Won' ? '#bbf7d0' : q.status==='Lost' ? '#fecaca' : isDup ? '#e5e7eb' : '#eff6ff';
+                      const textStyle = isDup ? {opacity:0.55, textDecoration:'line-through'} : {};
                       return React.createElement('tr',{
                         key:q.id,
                         onClick:()=>onEdit&&onEdit(q),
-                        style:{background:bg, cursor:'pointer', borderBottom:'1px solid #f1f5f9'},
-                        onMouseEnter:e=>e.currentTarget.style.background='#eff6ff',
+                        style:{background:bg, cursor:'pointer', borderBottom:'1px solid #f1f5f9', ...textStyle},
+                        onMouseEnter:e=>e.currentTarget.style.background=hoverBg,
                         onMouseLeave:e=>e.currentTarget.style.background=bg
                       },
                         React.createElement('td',{style:{padding:'8px 12px',fontSize:'13px',fontWeight:600,color:'#0f172a',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.job_name||'—'),
@@ -900,7 +905,8 @@ function QuoteListTest({ onEdit, refresh }) {
                             fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'99px',
                             background:STATUS_BG[q.status]||'#f1f5f9',
                             color:sc,
-                            border:`1px solid ${sc}30`
+                            border:`1px solid ${sc}30`,
+                            textDecoration:'none', opacity:1
                           }}, q.status||'—')
                         )
                       );
