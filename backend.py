@@ -2094,34 +2094,58 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                 pass
         return None
 
+    def _paginate_messages(url_start):
+        """Fetch up to 1000 messages from a paginated Graph URL."""
+        msgs = []
+        next_url = url_start
+        while next_url and len(msgs) < 1000:
+            try:
+                r = _req.get(next_url, headers=headers, timeout=30)
+                if r.status_code != 200:
+                    break
+                data = r.json()
+                msgs.extend(data.get("value", []))
+                next_url = data.get("@odata.nextLink")
+            except Exception:
+                break
+        return msgs
+
     results = []
     total_created = total_updated = total_skipped = 0
 
     with get_db() as con:
         for folder_name in folder_names:
-            folder_id = _find_folder_id(folder_name)
-            if not folder_id:
-                results.append({"folder": folder_name, "error": "Folder not found in mailbox"})
-                continue
-
             pl = "Hydrotech" if "hydrotech" in folder_name.lower() else "RMAX"
 
-            # Paginate through all messages (up to 1 000)
-            # Always fetch toRecipients — quotes are sent TO customers so that's where their address lives
+            # Collect messages from named folder (if it exists) + Sent Items filtered by subject
             msgs = []
-            next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
-                        f"/mailFolders/{folder_id}/messages"
-                        f"?$select=from,body,subject,toRecipients&$top=100")
-            while next_url and len(msgs) < 1000:
-                try:
-                    r = _req.get(next_url, headers=headers, timeout=30)
-                    if r.status_code != 200:
-                        break
-                    data = r.json()
-                    msgs.extend(data.get("value", []))
-                    next_url = data.get("@odata.nextLink")
-                except Exception:
-                    break
+            folder_id = _find_folder_id(folder_name)
+            if folder_id:
+                msgs = _paginate_messages(
+                    f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                    f"/mailFolders/{folder_id}/messages"
+                    f"?$select=from,body,subject,toRecipients&$top=100"
+                )
+
+            # Also scan Sent Items for emails with this folder name in the subject
+            # (catches quotes that never got moved to the folder)
+            subject_kw = folder_name.replace("'", "''")  # escape single quotes for OData
+            sent_msgs = _paginate_messages(
+                f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                f"/mailFolders/SentItems/messages"
+                f"?$filter=contains(subject,'{subject_kw}')"
+                f"&$select=from,body,subject,toRecipients&$top=100"
+            )
+            # Merge, deduplicating by message id
+            seen_ids = {m.get("id") for m in msgs}
+            for m in sent_msgs:
+                if m.get("id") not in seen_ids:
+                    msgs.append(m)
+                    seen_ids.add(m.get("id"))
+
+            if not msgs:
+                results.append({"folder": folder_name, "error": "No messages found in folder or Sent Items"})
+                continue
 
             created = updated = skipped = 0
             seen = set()
