@@ -528,7 +528,8 @@ def sync_from_outlook():
                     (subject, date_received)
                 ).fetchone()
                 if exists:
-                    if sent_to and exists["sent_to"] != sent_to:
+                    # Only fill in sent_to if blank — never overwrite a user-edited value
+                    if sent_to and not exists["sent_to"]:
                         con.execute("UPDATE quotes SET sent_to=? WHERE id=?",
                                     (sent_to, exists["id"]))
                         updated += 1
@@ -1418,7 +1419,8 @@ def hydrotech_sync():
                 (subject, date_received)
             ).fetchone()
             if exists:
-                if sent_to and exists["sent_to"] != sent_to:
+                # Only fill in sent_to if blank — never overwrite a user-edited value
+                if sent_to and not exists["sent_to"]:
                     con.execute("UPDATE hydrotech_quotes SET sent_to=? WHERE id=?",
                                 (sent_to, exists["id"]))
                     updated += 1
@@ -1746,7 +1748,8 @@ def glassworks_sync():
                 (subject, date_received)
             ).fetchone()
             if exists:
-                if sent_to and exists["sent_to"] != sent_to:
+                # Only fill in sent_to if blank — never overwrite a user-edited value
+                if sent_to and not exists["sent_to"]:
                     con.execute("UPDATE glassworks_quotes SET sent_to=? WHERE id=?",
                                 (sent_to, exists["id"]))
                     updated += 1
