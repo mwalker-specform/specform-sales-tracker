@@ -2119,15 +2119,12 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
 
             pl = "Hydrotech" if "hydrotech" in folder_name.lower() else "RMAX"
 
-            is_hydrotech = (pl == "Hydrotech")
-
             # Paginate through all messages (up to 1 000)
-            # For Hydrotech, also fetch toRecipients so we can read who the quote was sent TO
-            select_fields = "from,body,subject,toRecipients" if is_hydrotech else "from,body,subject"
+            # Always fetch toRecipients — quotes are sent TO customers so that's where their address lives
             msgs = []
             next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
                         f"/mailFolders/{folder_id}/messages"
-                        f"?$select={select_fields}&$top=100")
+                        f"?$select=from,body,subject,toRecipients&$top=100")
             while next_url and len(msgs) < 1000:
                 try:
                     r = _req.get(next_url, headers=headers, timeout=30)
@@ -2143,15 +2140,11 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
             seen = set()
 
             for msg in msgs:
-                if is_hydrotech:
-                    # Quote was sent TO the customer — read toRecipients, not from
-                    recipients = msg.get("toRecipients", [])
-                    if not recipients:
-                        continue
-                    contact_addr = recipients[0].get("emailAddress", {})
-                else:
-                    contact_addr = msg.get("from", {}).get("emailAddress", {})
-
+                # Quote was sent TO the customer — read toRecipients for their address
+                recipients = msg.get("toRecipients", [])
+                if not recipients:
+                    continue
+                contact_addr = recipients[0].get("emailAddress", {})
                 email = (contact_addr.get("address") or "").strip().lower()
                 name  = (contact_addr.get("name")    or "").strip()
                 if not email or email in seen:
