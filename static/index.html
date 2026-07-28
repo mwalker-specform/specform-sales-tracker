@@ -1952,6 +1952,7 @@ function App() {
           key: 'rmax',
           refresh,
           onEdit: q => openEdit(q, RMAX_CFG),
+          onNew: () => openEdit({}, RMAX_CFG),
           onRefresh: () => doRefresh(RMAX_CFG),
           syncing, syncMsg,
           cfg: RMAX_CFG,
