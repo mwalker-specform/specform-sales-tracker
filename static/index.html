@@ -229,7 +229,7 @@ function Dashboard() {
   useEffect(() => { apiFetch('/api/dashboard').then(setData).catch(console.error); }, []);
   if (!data) return React.createElement('div', {className:'p-8 text-gray-400'}, 'Loading…');
 
-  const { totals, by_location, by_region, by_region_month, by_month, by_status } = data;
+  const { totals, by_location, by_region, by_region_month, by_month, by_close_month, by_status } = data;
 
   // Build month lookup and sorted option list
   const monthMap = {};
@@ -319,6 +319,29 @@ function Dashboard() {
     region: region === '(No Region)' ? 'No Region' : region,
     count: selRegionMonth === 'avg' ? (regionTotal[region] || 0) : (regionForMonth[region] || 0)
   }));
+
+  // 12-Month Rolling Projected Sales chart data (by close_date)
+  const closeMap = {};
+  (by_close_month || []).forEach(r => { closeMap[r.month] = r; });
+  const projSalesData = Array.from({length:12}, (_,i) => {
+    const d = new Date(today.getFullYear(), today.getMonth() - 3 + i, 1);
+    const ym = d.toISOString().slice(0,7);
+    const label = d.toLocaleDateString('en-US',{month:'short',year:'2-digit'});
+    const row = closeMap[ym] || {};
+    return {
+      month: ym, name: label,
+      total:  row.total  || 0,
+      won:    row.won    || 0,
+      verbal: row.verbal || 0,
+      open:   row.open   || 0,
+      isFuture:  ym > currentYM,
+      isCurrent: ym === currentYM,
+    };
+  });
+  const projTotal  = projSalesData.reduce((s,r) => s + r.total,  0);
+  const projWon    = projSalesData.reduce((s,r) => s + r.won,    0);
+  const projVerbal = projSalesData.reduce((s,r) => s + r.verbal, 0);
+  const projOpen   = projSalesData.reduce((s,r) => s + r.open,   0);
 
   // Pipeline by Region chart data (amount-based, supports month filter)
   const pipelineChartData = (() => {
@@ -415,6 +438,49 @@ function Dashboard() {
           React.createElement(Line, {
             dataKey:'verbal', name:'Verbal', stroke:'#ca8a04',
             strokeWidth:2.5, strokeDasharray:'6 3', dot:{r:4, fill:'#ca8a04', strokeWidth:0}, activeDot:{r:6},
+            type:'monotone'
+          })
+        )
+      )
+    ),
+
+    // 12-Month Rolling Projected Sales (by close date)
+    React.createElement('div', {className:'card'},
+      React.createElement('div', {className:'flex items-center justify-between mb-1'},
+        React.createElement('h3', {className:'font-semibold text-gray-700'}, '12-Month Rolling Projected Sales'),
+        React.createElement('div', {className:'flex flex-wrap items-center gap-2 text-xs text-gray-500'},
+          React.createElement('span', {}, React.createElement('strong', {className:'text-blue-600'}, fmt(projTotal)), ' Pipeline'),
+          React.createElement('span', {}, React.createElement('strong', {className:'text-green-700'}, fmt(projWon)), ' Won'),
+          React.createElement('span', {}, React.createElement('strong', {className:'text-yellow-600'}, fmt(projVerbal)), ' Verbal'),
+          React.createElement('span', {}, React.createElement('strong', {className:'text-indigo-600'}, fmt(projOpen)), ' Open')
+        )
+      ),
+      React.createElement('p', {className:'text-xs text-gray-400 mb-4'}, 'Quote amounts by expected close date · 3 months past + 9 months ahead'),
+      React.createElement(ResponsiveContainer, {width:'100%', height:280},
+        React.createElement(ComposedChart, {data:projSalesData, margin:{top:10,right:20,left:10,bottom:5}},
+          React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+          React.createElement(XAxis, {dataKey:'name', tick:{fontSize:11}}),
+          React.createElement(YAxis, {tickFormatter:v=>'$'+Math.round(v/1000)+'k', tick:{fontSize:11}, width:52}),
+          React.createElement(Tooltip, {
+            formatter:(v,n)=>[fmt(v),n],
+            labelFormatter:(label,payload) => {
+              if (!payload || !payload[0]) return label;
+              const d = payload[0].payload;
+              return label + (d.isCurrent ? ' — Current Month' : d.isFuture ? ' — Projected' : ' — Actual');
+            }
+          }),
+          React.createElement(Legend),
+          React.createElement(ReferenceLine, {
+            x: new Date(today).toLocaleDateString('en-US',{month:'short',year:'2-digit'}),
+            stroke:'#94a3b8', strokeDasharray:'4 3', strokeWidth:1.5,
+            label:{value:'Today', position:'top', fontSize:10, fill:'#94a3b8'}
+          }),
+          React.createElement(Bar, {dataKey:'open',   name:'Open',   fill:'#c7d2fe', radius:[4,4,0,0], stackId:'a'}),
+          React.createElement(Bar, {dataKey:'verbal', name:'Verbal', fill:'#fef08a', radius:[0,0,0,0], stackId:'a'}),
+          React.createElement(Bar, {dataKey:'won',    name:'Won',    fill:'#bbf7d0', radius:[4,4,0,0], stackId:'a'}),
+          React.createElement(Line, {
+            dataKey:'total', name:'Total Pipeline', stroke:'#1F4E79',
+            strokeWidth:2.5, dot:{r:4, fill:'#1F4E79', strokeWidth:0}, activeDot:{r:6},
             type:'monotone'
           })
         )
