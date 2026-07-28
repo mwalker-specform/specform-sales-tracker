@@ -731,6 +731,32 @@ def dashboard():
             if st == 'Lost':   month_acc[ym]['lost']   += amt; month_acc[ym]['lost_count']   += 1
         by_month = [{'month': k, **v} for k, v in sorted(month_acc.items())]
 
+        # By close month — for 12-Month Rolling Projected Sales chart
+        raw_close = con.execute(
+            "SELECT close_date, status, amount FROM quotes "
+            "WHERE (deleted IS NULL OR deleted=0) AND close_date IS NOT NULL AND close_date != ''"
+        ).fetchall()
+        close_acc = defaultdict(lambda: dict(total=0.0, won=0.0, verbal=0.0, open=0.0))
+        for row in raw_close:
+            dt = parse_date(row["close_date"])
+            if not dt:
+                continue
+            ym  = dt.strftime('%Y-%m')
+            amt = float(row["amount"] or 0)
+            st  = (row["status"] or '').strip()
+            if st in ('Lost', 'Duplicate'):
+                continue
+            close_acc[ym]['total'] += amt
+            if st == 'Won':
+                close_acc[ym]['won']    += amt
+            elif st == 'Verbal':
+                close_acc[ym]['verbal'] += amt
+            else:
+                close_acc[ym]['open']   += amt
+        by_close_month = [{'month': k, 'total': round(v['total'], 2), 'won': round(v['won'], 2),
+                           'verbal': round(v['verbal'], 2), 'open': round(v['open'], 2)}
+                          for k, v in sorted(close_acc.items())]
+
         # Status breakdown
         by_status = con.execute("""
             SELECT status, COUNT(*) as count, COALESCE(SUM(amount),0) as amount
@@ -777,6 +803,7 @@ def dashboard():
             "by_region": [dict(r) for r in by_reg],
             "by_region_month": by_region_month,
             "by_month": [dict(r) for r in by_month],
+            "by_close_month": by_close_month,
             "by_status": [dict(r) for r in by_status],
             "locations": locations,
         }
