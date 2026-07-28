@@ -1972,22 +1972,6 @@ def import_contacts_from_quotes():
         for row in rmax_rows:  _add_row(row, "RMAX")
         for row in hydro_rows: _add_row(row, "Hydrotech")
 
-        def _find_existing(con, email, company):
-            """Look up existing contact by email first, then by company name (no-email records)."""
-            if email:
-                r = con.execute("SELECT id, email, company, location, product_line, manually_edited FROM contacts WHERE email=?", (email,)).fetchone()
-                if r:
-                    return r
-            if company:
-                r = con.execute(
-                    "SELECT id, email, company, location, product_line, manually_edited FROM contacts "
-                    "WHERE LOWER(TRIM(COALESCE(company,'')))=LOWER(TRIM(?))",
-                    (company,)
-                ).fetchone()
-                if r:
-                    return r
-            return None
-
         inserted = updated = skipped = 0
         for key, info in contact_map.items():
             email        = info["email"]
@@ -1995,7 +1979,11 @@ def import_contacts_from_quotes():
             location     = info["location"]
             product_line = "Both" if len(info["sources"]) > 1 else list(info["sources"])[0]
 
-            existing = _find_existing(con, email, company)
+            # Dedup by email only — same email = same person; different email = new contact
+            existing = con.execute(
+                "SELECT id, email, company, location, product_line, manually_edited FROM contacts WHERE email=?",
+                (email,)
+            ).fetchone() if email else None
             if existing:
                 if existing["manually_edited"]:
                     skipped += 1
@@ -2164,13 +2152,8 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                 company  = (qrow["customer"] if qrow else "") or ""
                 location = (qrow["location"] if qrow else "") or ""
 
-                # Check by email first, then by company name (avoid duplicates for manually-added contacts)
+                # Dedup by email only — same email = same person; different email = new contact
                 existing = con.execute("SELECT * FROM contacts WHERE email=?", (email,)).fetchone()
-                if not existing and company:
-                    existing = con.execute(
-                        "SELECT * FROM contacts WHERE LOWER(TRIM(COALESCE(company,'')))=LOWER(TRIM(?))",
-                        (company,)
-                    ).fetchone()
                 if existing:
                     # Never touch a contact the user has manually edited
                     if existing["manually_edited"]:
