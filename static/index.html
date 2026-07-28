@@ -837,170 +837,7 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
   );
 }
 
-// ── Layout Test tab (RMAX data, dense sortable table) ─────────────────────────
-function QuoteListTest({ onEdit, refresh }) {
-  const [quotes, setQuotes]     = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [search, setSearch]     = useState('');
-  const [statusFilter, setStatus] = useState('All');
-  const [regionFilter, setRegion] = useState('All');
-  const [sortCol, setSortCol]   = useState('date_received');
-  const [sortAsc, setSortAsc]   = useState(false);
 
-  const STATUS_COLORS = {Open:'#2563eb',Won:'#16a34a',Verbal:'#ca8a04',Lost:'#dc2626','Not Awarded':'#ea580c',Unlikely:'#7c3aed',Duplicate:'#6b7280','No Decision':'#6b7280'};
-  const STATUS_BG     = {Open:'#dbeafe',Won:'#dcfce7',Verbal:'#fef9c3',Lost:'#fee2e2','Not Awarded':'#ffedd5',Unlikely:'#ede9fe',Duplicate:'#f3f4f6','No Decision':'#f3f4f6'};
-  // Row background colors (whole row tint, matching RMAX Quotes tab)
-  const ROW_BG = {Won:'#dcfce7', Lost:'#fee2e2', Duplicate:'#f3f4f6'};
-  const STATUSES = ['All','Open','Won','Verbal','Lost','Not Awarded','Unlikely','Duplicate'];
-  const REGIONS  = ['All','Central Texas','Southeast Texas','The Valley'];
-
-  const load = () => {
-    setLoading(true);
-    apiFetch('/api/quotes').then(d => { setQuotes(d); setLoading(false); }).catch(() => setLoading(false));
-  };
-  useEffect(() => { load(); }, [refresh]);
-
-  const fmtAmt  = v => v != null && v !== '' ? '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '';
-  const fmtDate = s => { if (!s) return ''; const d = new Date(s+'T00:00:00'); return isNaN(d)?s:d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}); };
-
-  const toggleSort = col => {
-    if (sortCol === col) setSortAsc(a => !a);
-    else { setSortCol(col); setSortAsc(true); }
-  };
-
-  const visible = quotes
-    .filter(q => {
-      if (statusFilter !== 'All' && q.status !== statusFilter) return false;
-      if (regionFilter !== 'All' && (q.region||'').trim() !== regionFilter) return false;
-      if (search) {
-        const s = search.toLowerCase();
-        return ['customer','location','job_name','sent_to','product'].some(k => (q[k]||'').toLowerCase().includes(s));
-      }
-      return true;
-    })
-    .sort((a,b) => {
-      let av = a[sortCol], bv = b[sortCol];
-      if (sortCol === 'amount') { av = Number(av)||0; bv = Number(bv)||0; }
-      else { av = (av||'').toString().toLowerCase(); bv = (bv||'').toString().toLowerCase(); }
-      if (av < bv) return sortAsc ? -1 : 1;
-      if (av > bv) return sortAsc ? 1 : -1;
-      return 0;
-    });
-
-  const COLS = [
-    {key:'job_name',      label:'Job / Project', w:'20%'},
-    {key:'customer',      label:'Customer',   w:'18%'},
-    {key:'location',      label:'Location',   w:'14%'},
-    {key:'region',        label:'Region',     w:'13%'},
-    {key:'product',       label:'Product',    w:'9%'},
-    {key:'amount',        label:'Amount',     w:'9%',  right:true},
-    {key:'close_date',    label:'Close',      w:'9%'},
-    {key:'date_received', label:'Received',   w:'9%'},
-    {key:'status',        label:'Status',     w:'10%'},
-  ];
-
-  const SortIcon = ({col}) => {
-    if (sortCol !== col) return React.createElement('span',{style:{color:'#d1d5db',marginLeft:'3px'}},'⇅');
-    return React.createElement('span',{style:{color:'#1F4E79',marginLeft:'3px'}}, sortAsc ? '↑' : '↓');
-  };
-
-  return React.createElement('div', null,
-
-    // ── Toolbar ──
-    React.createElement('div', {style:{display:'flex',flexWrap:'wrap',gap:'8px',marginBottom:'10px',alignItems:'center'}},
-      React.createElement('input', {
-        type:'text', placeholder:'Search…', value:search,
-        onChange: e => setSearch(e.target.value),
-        style:{border:'1px solid #d1d5db',borderRadius:'7px',padding:'5px 11px',fontSize:'13px',minWidth:'180px',outline:'none'}
-      }),
-      // Status filter pills
-      React.createElement('div',{style:{display:'flex',gap:'4px',flexWrap:'wrap'}},
-        STATUSES.map(s => React.createElement('button',{
-          key:s, onClick:()=>setStatus(s),
-          style:{
-            padding:'4px 10px',borderRadius:'99px',fontSize:'12px',fontWeight:500,border:'none',cursor:'pointer',
-            background: statusFilter===s ? (STATUS_BG[s]||'#1F4E79') : '#f1f5f9',
-            color:       statusFilter===s ? (STATUS_COLORS[s]||'#1F4E79') : '#64748b',
-            outline:     statusFilter===s ? `1.5px solid ${STATUS_COLORS[s]||'#1F4E79'}` : 'none',
-          }
-        }, s))
-      ),
-      // Region filter
-      React.createElement('select',{
-        value:regionFilter, onChange:e=>setRegion(e.target.value),
-        style:{border:'1px solid #d1d5db',borderRadius:'7px',padding:'5px 10px',fontSize:'13px',color:'#374151',background:'#fff',cursor:'pointer'}
-      }, REGIONS.map(r => React.createElement('option',{key:r,value:r},r))),
-      React.createElement('span',{style:{fontSize:'12px',color:'#94a3b8',marginLeft:'auto'}},
-        `${visible.length} of ${quotes.length} quotes`)
-    ),
-
-    // ── Table ──
-    loading
-      ? React.createElement('div',{style:{padding:'40px',textAlign:'center',color:'#94a3b8'}},'Loading…')
-      : React.createElement('div',{style:{background:'#fff',borderRadius:'12px',boxShadow:'0 1px 3px rgba(0,0,0,0.07)',overflow:'hidden'}},
-          React.createElement('div',{style:{overflowX:'auto'}},
-            React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',tableLayout:'fixed'}},
-              // ── Header ──
-              React.createElement('thead',null,
-                React.createElement('tr',{style:{background:'#f8fafc',borderBottom:'2px solid #e2e8f0'}},
-                  COLS.map(c => React.createElement('th',{
-                    key:c.key,
-                    onClick:()=>toggleSort(c.key),
-                    style:{
-                      width:c.w, padding:'9px 12px', fontSize:'11px', fontWeight:700,
-                      color:'#475569', textTransform:'uppercase', letterSpacing:'0.05em',
-                      textAlign:c.right?'right':'left', cursor:'pointer', userSelect:'none',
-                      whiteSpace:'nowrap'
-                    }
-                  },
-                    c.label, React.createElement(SortIcon,{col:c.key})
-                  ))
-                )
-              ),
-              // ── Body ──
-              React.createElement('tbody',null,
-                visible.length === 0
-                  ? React.createElement('tr',null,
-                      React.createElement('td',{colSpan:COLS.length,style:{padding:'40px',textAlign:'center',color:'#94a3b8'}},'No quotes found')
-                    )
-                  : visible.map((q,i) => {
-                      const isDup = q.status === 'Duplicate';
-                      const sc  = STATUS_COLORS[q.status]||'#94a3b8';
-                      const bg  = ROW_BG[q.status] || (i%2===0 ? '#fff' : '#fafafa');
-                      const hoverBg = q.status==='Won' ? '#bbf7d0' : q.status==='Lost' ? '#fecaca' : isDup ? '#e5e7eb' : '#eff6ff';
-                      const textStyle = isDup ? {opacity:0.55, textDecoration:'line-through'} : {};
-                      return React.createElement('tr',{
-                        key:q.id,
-                        onClick:()=>onEdit&&onEdit(q),
-                        style:{background:bg, cursor:'pointer', borderBottom:'1px solid #f1f5f9', ...textStyle},
-                        onMouseEnter:e=>e.currentTarget.style.background=hoverBg,
-                        onMouseLeave:e=>e.currentTarget.style.background=bg
-                      },
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'13px',fontWeight:600,color:'#0f172a',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.job_name||'—'),
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#334155',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.customer||'—'),
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.location||'—'),
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.region||'—'),
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.product||'—'),
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'13px',fontWeight:700,color:'#1d4ed8',textAlign:'right',whiteSpace:'nowrap'}}, fmtAmt(q.amount)||'—'),
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',whiteSpace:'nowrap'}}, fmtDate(q.close_date)||'—'),
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',whiteSpace:'nowrap'}}, fmtDate(q.date_received)||'—'),
-                        React.createElement('td',{style:{padding:'8px 12px'}},
-                          React.createElement('span',{style:{
-                            fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'99px',
-                            background:STATUS_BG[q.status]||'#f1f5f9',
-                            color:sc,
-                            border:`1px solid ${sc}30`,
-                            textDecoration:'none', opacity:1
-                          }}, q.status||'—')
-                        )
-                      );
-                    })
-              )
-            )
-          )
-        )
-  );
-}
 
 // ── SPECFORM Overall Sales tab ────────────────────────────────────────────────
 const PRODUCT_COLORS = {
@@ -1989,11 +1826,6 @@ function App() {
           onClick:()=>setTab('glassworks')
         }, '🪟 Glassworks Quotes'),
         React.createElement('button', {
-          className:`tab ${tab==='test'?'tab-active':'tab-inactive'}`,
-          style: tab==='test' ? {background:'#7c3aed'} : {},
-          onClick:()=>setTab('test')
-        }, '🧪 Layout Test'),
-        React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           style:{marginLeft:'auto'},
           onClick:()=>setTab('sales')
@@ -2004,7 +1836,6 @@ function App() {
     // Content
     React.createElement('main', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-6'},
       tab === 'dashboard' ? React.createElement(Dashboard, {key:refresh})
-      : tab === 'test'       ? React.createElement(QuoteListTest, {key:'test', refresh, onEdit: q => openEdit(q, RMAX_CFG)})
       : tab === 'sales'      ? React.createElement(SalesTab)
       : tab === 'directory'  ? React.createElement(CustomerDirectory, {key:'dir'})
       : tab === 'hydrotech' ? React.createElement(QuoteList, {
