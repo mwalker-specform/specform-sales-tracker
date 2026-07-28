@@ -482,9 +482,19 @@ function Dashboard() {
             React.createElement(XAxis, {dataKey:'region', tick:{fontSize:11}}),
             React.createElement(YAxis, {allowDecimals:false, tick:{fontSize:11}, width:35}),
             React.createElement(Tooltip, {formatter:(v)=>[v, 'Quotes']}),
-            React.createElement(Bar, {dataKey:'count', name:'Quotes', fill:'#1F4E79', radius:[4,4,0,0],
-              label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#1F4E79'}
-            })
+            React.createElement(Bar, {dataKey:'count', name:'Quotes', radius:[4,4,0,0],
+              label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#374151'}
+            },
+              rmChartData.map((entry, i) => {
+                const REGION_COLORS = {
+                  'Central Texas':   '#3b82f6',
+                  'Southeast Texas': '#f97316',
+                  'The Valley':      '#16a34a',
+                  'No Region':       '#9ca3af',
+                };
+                return React.createElement(Cell, {key:i, fill: REGION_COLORS[entry.region] || '#6b7280'});
+              })
+            )
           )
         )
       )
