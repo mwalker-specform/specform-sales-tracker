@@ -699,6 +699,18 @@ def dashboard():
             ORDER BY total DESC
         """).fetchall()
 
+        # By region
+        by_reg = con.execute("""
+            SELECT COALESCE(NULLIF(TRIM(region),''),'(No Region)') as region,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
+            FROM quotes
+            WHERE (deleted IS NULL OR deleted=0)
+            GROUP BY region
+            ORDER BY total DESC
+        """).fetchall()
+
         # By month — parse dates in Python to handle M/D/YYYY, "Jul 13, 2026", etc.
         cutoff = datetime.now().replace(day=1) - timedelta(days=335)  # ~11 months ago
         raw_quotes = con.execute(
@@ -736,6 +748,7 @@ def dashboard():
         return {
             "totals": dict(totals),
             "by_location": [dict(r) for r in by_loc],
+            "by_region": [dict(r) for r in by_reg],
             "by_month": [dict(r) for r in by_month],
             "by_status": [dict(r) for r in by_status],
             "locations": locations,
