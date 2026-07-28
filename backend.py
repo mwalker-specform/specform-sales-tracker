@@ -1952,12 +1952,11 @@ def import_contacts_from_quotes():
         def _add_row(row, source):
             raw    = (row["sent_to"] or "").strip()
             email  = raw.lower() if _EMAIL_RE.match(raw) else None
+            if not email:
+                return  # skip entries with no valid email address
             company = (row["customer"] or "").strip()
             location = (row["location"] or "").strip()
-            # Key: prefer email, fall back to normalised company name
-            key = email if email else ("company:" + company.lower()) if company else None
-            if not key:
-                return
+            key = email
             if key not in contact_map:
                 contact_map[key] = {"email": email, "company": company, "location": location, "sources": set()}
             else:
