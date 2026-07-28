@@ -1936,54 +1936,88 @@ def delete_contact(contact_id: int):
         con.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
         return {"ok": True}
 
+_EMAIL_RE = _re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
 @app.post("/api/contacts/import-from-quotes")
 def import_contacts_from_quotes():
-    """Scan both quote tables and create contact entries for unique sent_to emails."""
+    """Scan both quote tables and create contact entries for unique customers / sent_to emails."""
     from collections import defaultdict
     with get_db() as con:
         rmax_rows  = con.execute("SELECT DISTINCT sent_to, customer, location FROM quotes WHERE (deleted IS NULL OR deleted=0) AND sent_to IS NOT NULL AND sent_to != ''").fetchall()
         hydro_rows = con.execute("SELECT DISTINCT sent_to, customer, location FROM hydrotech_quotes WHERE sent_to IS NOT NULL AND sent_to != ''").fetchall()
 
-        contact_map = defaultdict(lambda: {"company": "", "location": "", "sources": set()})
-        for row in rmax_rows:
-            e = (row["sent_to"] or "").strip().lower()
-            if e:
-                contact_map[e]["company"]  = contact_map[e]["company"]  or (row["customer"] or "")
-                contact_map[e]["location"] = contact_map[e]["location"] or (row["location"] or "")
-                contact_map[e]["sources"].add("RMAX")
-        for row in hydro_rows:
-            e = (row["sent_to"] or "").strip().lower()
-            if e:
-                contact_map[e]["company"]  = contact_map[e]["company"]  or (row["customer"] or "")
-                contact_map[e]["location"] = contact_map[e]["location"] or (row["location"] or "")
-                contact_map[e]["sources"].add("Hydrotech")
+        # Build a map keyed by email (validated) or company name (as fallback)
+        contact_map = {}  # key -> {"email": str|None, "company": str, "location": str, "sources": set}
+
+        def _add_row(row, source):
+            raw    = (row["sent_to"] or "").strip()
+            email  = raw.lower() if _EMAIL_RE.match(raw) else None
+            company = (row["customer"] or "").strip()
+            location = (row["location"] or "").strip()
+            # Key: prefer email, fall back to normalised company name
+            key = email if email else ("company:" + company.lower()) if company else None
+            if not key:
+                return
+            if key not in contact_map:
+                contact_map[key] = {"email": email, "company": company, "location": location, "sources": set()}
+            else:
+                if email and not contact_map[key]["email"]:
+                    contact_map[key]["email"] = email
+                if company and not contact_map[key]["company"]:
+                    contact_map[key]["company"] = company
+                if location and not contact_map[key]["location"]:
+                    contact_map[key]["location"] = location
+            contact_map[key]["sources"].add(source)
+
+        for row in rmax_rows:  _add_row(row, "RMAX")
+        for row in hydro_rows: _add_row(row, "Hydrotech")
+
+        def _find_existing(con, email, company):
+            """Look up existing contact by email first, then by company name (no-email records)."""
+            if email:
+                r = con.execute("SELECT id, email, company, location, product_line, manually_edited FROM contacts WHERE email=?", (email,)).fetchone()
+                if r:
+                    return r
+            if company:
+                r = con.execute(
+                    "SELECT id, email, company, location, product_line, manually_edited FROM contacts "
+                    "WHERE LOWER(TRIM(COALESCE(company,'')))=LOWER(TRIM(?)) AND (email IS NULL OR email='')",
+                    (company,)
+                ).fetchone()
+                if r:
+                    return r
+            return None
 
         inserted = updated = skipped = 0
-        for email, info in contact_map.items():
+        for key, info in contact_map.items():
+            email        = info["email"]
+            company      = info["company"]
+            location     = info["location"]
             product_line = "Both" if len(info["sources"]) > 1 else list(info["sources"])[0]
-            existing = con.execute("SELECT id, company, location, product_line, manually_edited FROM contacts WHERE email=?", (email,)).fetchone()
+
+            existing = _find_existing(con, email, company)
             if existing:
-                # Never touch a contact the user has manually edited
                 if existing["manually_edited"]:
                     skipped += 1
                     continue
                 updates = {}
-                if info["company"]  and not existing["company"]:  updates["company"]  = info["company"]
-                if info["location"] and not existing["location"]: updates["location"] = info["location"]
+                if email    and not existing["email"]:    updates["email"]    = email
+                if company  and not existing["company"]:  updates["company"]  = company
+                if location and not existing["location"]: updates["location"] = location
                 if product_line == "Both" and existing["product_line"] != "Both":
                     updates["product_line"] = "Both"
                 if updates:
                     set_clause = ", ".join(f"{k}=?" for k in updates)
-                    con.execute(f"UPDATE contacts SET {set_clause}, updated_at=datetime('now') WHERE email=?",
-                                list(updates.values()) + [email])
+                    con.execute(f"UPDATE contacts SET {set_clause}, updated_at=datetime('now') WHERE id=?",
+                                list(updates.values()) + [existing["id"]])
                     updated += 1
                 else:
                     skipped += 1
             else:
-                con.execute("""
-                INSERT INTO contacts (email,company,location,product_line)
-                VALUES (?,?,?,?)
-                """, (email, info["company"], info["location"], product_line))
+                con.execute(
+                    "INSERT INTO contacts (email, company, location, product_line) VALUES (?,?,?,?)",
+                    (email, company, location, product_line)
+                )
                 inserted += 1
 
         return {"inserted": inserted, "updated": updated, "skipped": skipped, "total": inserted + updated + skipped}
@@ -2125,7 +2159,13 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                 company  = (qrow["customer"] if qrow else "") or ""
                 location = (qrow["location"] if qrow else "") or ""
 
+                # Check by email first, then by company name (avoid duplicates for manually-added contacts)
                 existing = con.execute("SELECT * FROM contacts WHERE email=?", (email,)).fetchone()
+                if not existing and company:
+                    existing = con.execute(
+                        "SELECT * FROM contacts WHERE LOWER(TRIM(COALESCE(company,'')))=LOWER(TRIM(?)) AND (email IS NULL OR email='')",
+                        (company,)
+                    ).fetchone()
                 if existing:
                     # Never touch a contact the user has manually edited
                     if existing["manually_edited"]:
@@ -2136,14 +2176,16 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                     if phone    and not existing["phone"]:    updates["phone"]    = phone
                     if company  and not existing["company"]:  updates["company"]  = company
                     if location and not existing["location"]: updates["location"] = location
+                    # Fill in email if matched by company name and email was blank
+                    if email and not existing["email"]:       updates["email"]    = email
                     # Upgrade product_line to Both if contact now appears in a second line
                     if existing["product_line"] and existing["product_line"] != pl and existing["product_line"] != "Both":
                         updates["product_line"] = "Both"
                     if updates:
                         set_clause = ", ".join(f"{k}=?" for k in updates)
                         con.execute(
-                            f"UPDATE contacts SET {set_clause}, updated_at=datetime('now') WHERE email=?",
-                            list(updates.values()) + [email]
+                            f"UPDATE contacts SET {set_clause}, updated_at=datetime('now') WHERE id=?",
+                            list(updates.values()) + [existing["id"]]
                         )
                         updated += 1
                     else:
