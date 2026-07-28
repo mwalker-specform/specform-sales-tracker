@@ -740,6 +740,25 @@ def dashboard():
             ORDER BY amount DESC
         """).fetchall()
 
+        # By region and month — for regional monthly trends chart
+        raw_rq = con.execute(
+            "SELECT date_received, region, amount FROM quotes WHERE (deleted IS NULL OR deleted=0) AND date_received IS NOT NULL AND date_received != ''"
+        ).fetchall()
+        rm_acc = {}
+        for row in raw_rq:
+            dt = parse_date(row["date_received"])
+            if not dt:
+                continue
+            ym     = dt.strftime('%Y-%m')
+            region = (row["region"] or '').strip() or '(No Region)'
+            key    = (region, ym)
+            if key not in rm_acc:
+                rm_acc[key] = {'region': region, 'month': ym, 'total': 0.0, 'count': 0}
+            rm_acc[key]['total'] += float(row["amount"] or 0)
+            rm_acc[key]['count'] += 1
+        by_region_month = [{'region': k[0], 'month': k[1], 'total': round(v['total'], 2), 'count': v['count']}
+                           for k, v in sorted(rm_acc.items())]
+
         # Distinct filter options
         locations = [r[0] for r in con.execute(
             "SELECT DISTINCT location FROM quotes WHERE (deleted IS NULL OR deleted=0) AND location IS NOT NULL ORDER BY location"
@@ -749,6 +768,7 @@ def dashboard():
             "totals": dict(totals),
             "by_location": [dict(r) for r in by_loc],
             "by_region": [dict(r) for r in by_reg],
+            "by_region_month": by_region_month,
             "by_month": [dict(r) for r in by_month],
             "by_status": [dict(r) for r in by_status],
             "locations": locations,
