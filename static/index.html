@@ -415,59 +415,38 @@ function Dashboard() {
         )
       ),
 
-      // Status breakdown table
+      // Total Quotes by Region
       React.createElement('div', {className:'card'},
-        React.createElement('h3', {className:'font-semibold text-gray-700 mb-3'}, 'Status Breakdown'),
-        React.createElement('table', {className:'w-full text-sm'},
-          React.createElement('thead', {},
-            React.createElement('tr', {className:'text-left text-xs text-gray-500 uppercase border-b'},
-              React.createElement('th', {className:'pb-2 pr-4'}, 'Status'),
-              React.createElement('th', {className:'pb-2 pr-4 text-right'}, 'Count'),
-              React.createElement('th', {className:'pb-2 text-right'}, 'Amount')
-            )
-          ),
-          React.createElement('tbody', {},
-            by_status.map(r => React.createElement('tr', {key:r.status, className:'border-b border-gray-50'},
-              React.createElement('td', {className:'py-2 pr-4'}, React.createElement(StatusBadge, {status:r.status})),
-              React.createElement('td', {className:'py-2 pr-4 text-right text-gray-600'}, r.count),
-              React.createElement('td', {className:'py-2 text-right font-medium text-gray-700'}, fmt(r.amount))
-            ))
+        React.createElement('div', {className:'flex items-center justify-between mb-1'},
+          React.createElement('h3', {className:'font-semibold text-gray-700'}, 'Total Quotes by Region'),
+          React.createElement('select', {
+            value: selRegionMonth,
+            onChange: e => setSelRegionMonth(e.target.value),
+            style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
+                   background:'#fff', color:'#374151', cursor:'pointer', width:'170px'},
+          },
+            React.createElement('option', {value:'avg'}, 'Overall (Year)'),
+            allMonthsRM.map(m => {
+              const label = new Date(m + '-02').toLocaleDateString('en-US',{month:'short',year:'numeric'});
+              return React.createElement('option', {key:m, value:m}, label);
+            })
           )
-        )
-      )
-    ),
-
-    // ── Total Quotes by Region chart ──
-    React.createElement('div', {className:'card'},
-      React.createElement('div', {className:'flex items-center justify-between mb-1'},
-        React.createElement('h3', {className:'font-semibold text-gray-700'}, 'Total Quotes by Region'),
-        React.createElement('select', {
-          value: selRegionMonth,
-          onChange: e => setSelRegionMonth(e.target.value),
-          style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
-                 background:'#fff', color:'#374151', cursor:'pointer', width:'170px'},
-        },
-          React.createElement('option', {value:'avg'}, 'Overall (Year)'),
-          allMonthsRM.map(m => {
-            const label = new Date(m + '-02').toLocaleDateString('en-US',{month:'short',year:'numeric'});
-            return React.createElement('option', {key:m, value:m}, label);
-          })
-        )
-      ),
-      React.createElement('p', {className:'text-xs text-gray-400 mb-4'},
-        selRegionMonth === 'avg'
-          ? 'Total number of quotes per region across all time'
-          : 'Number of quotes per region for the selected month'
-      ),
-      React.createElement(ResponsiveContainer, {width:'100%', height:220},
-        React.createElement(BarChart, {data:rmChartData, margin:{top:20,right:20,left:10,bottom:5}},
-          React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
-          React.createElement(XAxis, {dataKey:'region', tick:{fontSize:11}}),
-          React.createElement(YAxis, {allowDecimals:false, tick:{fontSize:11}, width:35}),
-          React.createElement(Tooltip, {formatter:(v)=>[v, 'Quotes']}),
-          React.createElement(Bar, {dataKey:'count', name:'Quotes', fill:'#1F4E79', radius:[4,4,0,0],
-            label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#1F4E79'}
-          })
+        ),
+        React.createElement('p', {className:'text-xs text-gray-400 mb-4'},
+          selRegionMonth === 'avg'
+            ? 'Total number of quotes per region across all time'
+            : 'Number of quotes per region for the selected month'
+        ),
+        React.createElement(ResponsiveContainer, {width:'100%', height:220},
+          React.createElement(BarChart, {data:rmChartData, margin:{top:20,right:20,left:10,bottom:5}},
+            React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+            React.createElement(XAxis, {dataKey:'region', tick:{fontSize:11}}),
+            React.createElement(YAxis, {allowDecimals:false, tick:{fontSize:11}, width:35}),
+            React.createElement(Tooltip, {formatter:(v)=>[v, 'Quotes']}),
+            React.createElement(Bar, {dataKey:'count', name:'Quotes', fill:'#1F4E79', radius:[4,4,0,0],
+              label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#1F4E79'}
+            })
+          )
         )
       )
     )
