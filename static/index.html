@@ -802,8 +802,8 @@ function QuoteListTest({ onEdit, refresh }) {
     });
 
   const COLS = [
-    {key:'customer',      label:'Customer',   w:'18%'},
     {key:'job_name',      label:'Job / Project', w:'20%'},
+    {key:'customer',      label:'Customer',   w:'18%'},
     {key:'location',      label:'Location',   w:'14%'},
     {key:'region',        label:'Region',     w:'13%'},
     {key:'product',       label:'Product',    w:'9%'},
@@ -887,8 +887,8 @@ function QuoteListTest({ onEdit, refresh }) {
                         onMouseEnter:e=>e.currentTarget.style.background='#eff6ff',
                         onMouseLeave:e=>e.currentTarget.style.background=bg
                       },
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'13px',fontWeight:600,color:'#0f172a',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.customer||'—'),
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#334155',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.job_name||'—'),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'13px',fontWeight:600,color:'#0f172a',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.job_name||'—'),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#334155',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.customer||'—'),
                         React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.location||'—'),
                         React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.region||'—'),
                         React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, q.product||'—'),
