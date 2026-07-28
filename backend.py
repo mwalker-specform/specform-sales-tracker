@@ -1981,7 +1981,7 @@ def import_contacts_from_quotes():
             if company:
                 r = con.execute(
                     "SELECT id, email, company, location, product_line, manually_edited FROM contacts "
-                    "WHERE LOWER(TRIM(COALESCE(company,'')))=LOWER(TRIM(?)) AND (email IS NULL OR email='')",
+                    "WHERE LOWER(TRIM(COALESCE(company,'')))=LOWER(TRIM(?))",
                     (company,)
                 ).fetchone()
                 if r:
@@ -2168,7 +2168,7 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                 existing = con.execute("SELECT * FROM contacts WHERE email=?", (email,)).fetchone()
                 if not existing and company:
                     existing = con.execute(
-                        "SELECT * FROM contacts WHERE LOWER(TRIM(COALESCE(company,'')))=LOWER(TRIM(?)) AND (email IS NULL OR email='')",
+                        "SELECT * FROM contacts WHERE LOWER(TRIM(COALESCE(company,'')))=LOWER(TRIM(?))",
                         (company,)
                     ).fetchone()
                 if existing:
