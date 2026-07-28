@@ -297,18 +297,17 @@ function Dashboard() {
   const allRegionsD   = [...new Set(rmData.map(r => r.region))];
   const allMonthsRM   = [...new Set(rmData.map(r => r.month))].sort().reverse(); // most recent first
 
-  // Average monthly total per region (all-time)
-  const regionAvg = {};
+  // Total quote count per region (all-time)
+  const regionTotal = {};
   allRegionsD.forEach(region => {
     const rows = rmData.filter(r => r.region === region);
-    const total = rows.reduce((s, r) => s + r.total, 0);
-    regionAvg[region] = rows.length > 0 ? total / rows.length : 0;
+    regionTotal[region] = rows.reduce((s, r) => s + r.count, 0);
   });
 
-  // Specific month totals per region
+  // Specific month quote count per region
   const regionForMonth = {};
   if (selRegionMonth !== 'avg') {
-    rmData.filter(r => r.month === selRegionMonth).forEach(r => { regionForMonth[r.region] = r.total; });
+    rmData.filter(r => r.month === selRegionMonth).forEach(r => { regionForMonth[r.region] = r.count; });
   }
 
   // Ordered chart data: known regions first, then any extras
@@ -317,7 +316,7 @@ function Dashboard() {
     ...allRegionsD.filter(r => !REGION_ORDER_D.includes(r))
   ].map(region => ({
     region: region === '(No Region)' ? 'No Region' : region,
-    amount: Math.round(selRegionMonth === 'avg' ? (regionAvg[region] || 0) : (regionForMonth[region] || 0))
+    count: selRegionMonth === 'avg' ? (regionTotal[region] || 0) : (regionForMonth[region] || 0)
   }));
 
   return React.createElement('div', {className:'space-y-6'},
@@ -438,17 +437,17 @@ function Dashboard() {
       )
     ),
 
-    // ── Avg Quote Amount by Region chart ──
+    // ── Total Quotes by Region chart ──
     React.createElement('div', {className:'card'},
       React.createElement('div', {className:'flex items-center justify-between mb-1'},
-        React.createElement('h3', {className:'font-semibold text-gray-700'}, 'Avg Quote Amount per Month by Region'),
+        React.createElement('h3', {className:'font-semibold text-gray-700'}, 'Total Quotes by Region'),
         React.createElement('select', {
           value: selRegionMonth,
           onChange: e => setSelRegionMonth(e.target.value),
           style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
                  background:'#fff', color:'#374151', cursor:'pointer', width:'170px'},
         },
-          React.createElement('option', {value:'avg'}, 'Overall (Avg / Month)'),
+          React.createElement('option', {value:'avg'}, 'Overall (Year)'),
           allMonthsRM.map(m => {
             const label = new Date(m + '-02').toLocaleDateString('en-US',{month:'short',year:'numeric'});
             return React.createElement('option', {key:m, value:m}, label);
@@ -457,17 +456,17 @@ function Dashboard() {
       ),
       React.createElement('p', {className:'text-xs text-gray-400 mb-4'},
         selRegionMonth === 'avg'
-          ? 'Average monthly quote total per region across all recorded months'
-          : 'Total quote amount for the selected month, broken out by region'
+          ? 'Total number of quotes per region across all time'
+          : 'Number of quotes per region for the selected month'
       ),
       React.createElement(ResponsiveContainer, {width:'100%', height:220},
-        React.createElement(BarChart, {data:rmChartData, margin:{top:5,right:20,left:10,bottom:5}},
+        React.createElement(BarChart, {data:rmChartData, margin:{top:20,right:20,left:10,bottom:5}},
           React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
           React.createElement(XAxis, {dataKey:'region', tick:{fontSize:11}}),
-          React.createElement(YAxis, {tickFormatter:v=>'$'+Math.round(v/1000)+'k', tick:{fontSize:11}, width:55}),
-          React.createElement(Tooltip, {formatter:(v)=>[fmt(v), selRegionMonth==='avg'?'Avg/Month':'Total']}),
-          React.createElement(Bar, {dataKey:'amount', name:selRegionMonth==='avg'?'Avg / Month':'Total', fill:'#1F4E79', radius:[4,4,0,0],
-            label:{position:'top', formatter:v=>v>0?'$'+Math.round(v/1000)+'k':'', fontSize:10, fill:'#475569'}
+          React.createElement(YAxis, {allowDecimals:false, tick:{fontSize:11}, width:35}),
+          React.createElement(Tooltip, {formatter:(v)=>[v, 'Quotes']}),
+          React.createElement(Bar, {dataKey:'count', name:'Quotes', fill:'#1F4E79', radius:[4,4,0,0],
+            label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#1F4E79'}
           })
         )
       )
