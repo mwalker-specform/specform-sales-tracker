@@ -1958,19 +1958,27 @@ def import_contacts_from_quotes():
                 contact_map[e]["location"] = contact_map[e]["location"] or (row["location"] or "")
                 contact_map[e]["sources"].add("Hydrotech")
 
-        inserted = skipped = 0
+        inserted = updated = skipped = 0
         for email, info in contact_map.items():
             product_line = "Both" if len(info["sources"]) > 1 else list(info["sources"])[0]
-            existing = con.execute("SELECT id, product_line, manually_edited FROM contacts WHERE email=?", (email,)).fetchone()
+            existing = con.execute("SELECT id, company, location, product_line, manually_edited FROM contacts WHERE email=?", (email,)).fetchone()
             if existing:
                 # Never touch a contact the user has manually edited
                 if existing["manually_edited"]:
                     skipped += 1
                     continue
-                # Upgrade to Both if now seen in both product lines
+                updates = {}
+                if info["company"]  and not existing["company"]:  updates["company"]  = info["company"]
+                if info["location"] and not existing["location"]: updates["location"] = info["location"]
                 if product_line == "Both" and existing["product_line"] != "Both":
-                    con.execute("UPDATE contacts SET product_line='Both',updated_at=datetime('now') WHERE email=?", (email,))
-                skipped += 1
+                    updates["product_line"] = "Both"
+                if updates:
+                    set_clause = ", ".join(f"{k}=?" for k in updates)
+                    con.execute(f"UPDATE contacts SET {set_clause}, updated_at=datetime('now') WHERE email=?",
+                                list(updates.values()) + [email])
+                    updated += 1
+                else:
+                    skipped += 1
             else:
                 con.execute("""
                 INSERT INTO contacts (email,company,location,product_line)
@@ -1978,7 +1986,7 @@ def import_contacts_from_quotes():
                 """, (email, info["company"], info["location"], product_line))
                 inserted += 1
 
-        return {"inserted": inserted, "skipped": skipped, "total": inserted + skipped}
+        return {"inserted": inserted, "updated": updated, "skipped": skipped, "total": inserted + updated + skipped}
 
 @app.get("/api/contacts/fetch-signature/{email:path}")
 def fetch_contact_signature(email: str):
@@ -2111,6 +2119,12 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                 sig_text     = _extract_sig_text(body_text)
                 phone        = _extract_phone(sig_text or body_text)
 
+                # Pull company/location from quotes tables
+                qrow = (con.execute("SELECT customer, location FROM quotes WHERE LOWER(sent_to)=? AND customer!='' LIMIT 1", (email,)).fetchone()
+                        or con.execute("SELECT customer, location FROM hydrotech_quotes WHERE LOWER(sent_to)=? AND customer!='' LIMIT 1", (email,)).fetchone())
+                company  = (qrow["customer"] if qrow else "") or ""
+                location = (qrow["location"] if qrow else "") or ""
+
                 existing = con.execute("SELECT * FROM contacts WHERE email=?", (email,)).fetchone()
                 if existing:
                     # Never touch a contact the user has manually edited
@@ -2118,8 +2132,10 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                         skipped += 1
                         continue
                     updates = {}
-                    if name  and not existing["name"]:  updates["name"]  = name
-                    if phone and not existing["phone"]: updates["phone"] = phone
+                    if name     and not existing["name"]:     updates["name"]     = name
+                    if phone    and not existing["phone"]:    updates["phone"]    = phone
+                    if company  and not existing["company"]:  updates["company"]  = company
+                    if location and not existing["location"]: updates["location"] = location
                     # Upgrade product_line to Both if contact now appears in a second line
                     if existing["product_line"] and existing["product_line"] != pl and existing["product_line"] != "Both":
                         updates["product_line"] = "Both"
@@ -2134,8 +2150,8 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                         skipped += 1
                 else:
                     con.execute(
-                        "INSERT INTO contacts (name,email,phone,product_line) VALUES (?,?,?,?)",
-                        (name, email, phone, pl)
+                        "INSERT INTO contacts (name,email,phone,company,location,product_line) VALUES (?,?,?,?,?,?)",
+                        (name, email, phone, company, location, pl)
                     )
                     created += 1
 
