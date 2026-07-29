@@ -619,6 +619,30 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
   const setFilter = (k,v) => setFilters(f => ({...f,[k]:v}));
 
   return React.createElement('div', {className:'space-y-4'},
+    // Dashboard banner button
+    onDashboard && React.createElement('div', {style:{display:'flex', justifyContent:'flex-end', marginBottom:'4px'}},
+      React.createElement('button', {
+        onClick: onDashboard,
+        style:{
+          background:'linear-gradient(135deg,#1F4E79,#2e6fad)',
+          color:'#fff',
+          border:'none',
+          borderRadius:'10px',
+          padding:'12px 28px',
+          fontSize:'16px',
+          fontWeight:700,
+          letterSpacing:'0.5px',
+          cursor:'pointer',
+          boxShadow:'0 4px 12px rgba(31,78,121,0.35)',
+          display:'flex',
+          alignItems:'center',
+          gap:'10px'
+        }
+      },
+        React.createElement('span', {style:{fontSize:'20px'}}, '📊'),
+        'RMAX Dashboard'
+      )
+    ),
     // Toolbar row 1: search + status + actions
     React.createElement('div', {className:'flex flex-wrap gap-2 items-center'},
       React.createElement('input', {
@@ -678,11 +702,6 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
           onClick: onRefresh,
           disabled: syncing
         }, syncing ? '⟳ Syncing…' : '↻ Refresh Quotes'),
-        onDashboard && React.createElement('button', {
-          className:'btn flex items-center gap-2',
-          style:{background:'#1F4E79', color:'#fff', border:'none', fontWeight:600},
-          onClick: onDashboard
-        }, '📊 Dashboard'),
       )
     ),
     // Toolbar row 2: region tabs
