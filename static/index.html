@@ -619,14 +619,6 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
   const setFilter = (k,v) => setFilters(f => ({...f,[k]:v}));
 
   return React.createElement('div', {className:'space-y-4'},
-    // Dashboard shortcut above toolbar
-    onDashboard && React.createElement('div', {className:'flex justify-end'},
-      React.createElement('button', {
-        className:'btn flex items-center gap-2',
-        style:{background:'#1F4E79', color:'#fff', border:'none', fontWeight:600},
-        onClick: onDashboard
-      }, '📊 Dashboard')
-    ),
     // Toolbar row 1: search + status + actions
     React.createElement('div', {className:'flex flex-wrap gap-2 items-center'},
       React.createElement('input', {
@@ -686,6 +678,11 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
           onClick: onRefresh,
           disabled: syncing
         }, syncing ? '⟳ Syncing…' : '↻ Refresh Quotes'),
+        onDashboard && React.createElement('button', {
+          className:'btn flex items-center gap-2',
+          style:{background:'#1F4E79', color:'#fff', border:'none', fontWeight:600},
+          onClick: onDashboard
+        }, '📊 Dashboard'),
       )
     ),
     // Toolbar row 2: region tabs
