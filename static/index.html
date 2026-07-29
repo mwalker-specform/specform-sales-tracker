@@ -572,7 +572,7 @@ function Dashboard() {
 // Normalize state abbreviations for grouping/filtering
 const normLoc = s => (s || '(No Location)').replace(/,?\s+([a-zA-Z]{2})$/, (_, st) => ', ' + st.toUpperCase());
 
-function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
+function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
   const { quotesBase, exportUrl, dashboardBase } = cfg;
   const [quotes, setQuotes]             = useState([]);
   const [loading, setLoading]           = useState(true);
@@ -677,7 +677,12 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
           className:'btn btn-primary flex items-center gap-2',
           onClick: onRefresh,
           disabled: syncing
-        }, syncing ? '⟳ Syncing…' : '↻ Refresh Quotes')
+        }, syncing ? '⟳ Syncing…' : '↻ Refresh Quotes'),
+        onDashboard && React.createElement('button', {
+          className:'btn flex items-center gap-2',
+          style:{background:'#1F4E79', color:'#fff', border:'none', fontWeight:600},
+          onClick: onDashboard
+        }, '📊 Dashboard')
       )
     ),
     // Toolbar row 2: region tabs
@@ -2022,6 +2027,7 @@ function App() {
           refresh,
           onEdit: q => openEdit(q, RMAX_CFG),
           onNew: () => openEdit({}, RMAX_CFG),
+          onDashboard: () => setTab('dashboard'),
           onRefresh: () => doRefresh(RMAX_CFG),
           syncing, syncMsg,
           cfg: RMAX_CFG,
