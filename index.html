@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>SPECFORM SalesPartner</title>
+<title>SPECFORM SalesPartner</title><!-- v101 -->
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Montserrat:wght@400;700;900&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -221,18 +221,21 @@ function Confirm({ message, onYes, onNo }) {
 }
 
 // ── Dashboard view ────────────────────────────────────────────────────────────
-function Dashboard() {
-  const [data, setData]         = useState(null);
-  const [selMonth, setSelMonth] = useState('all');
-  useEffect(() => { apiFetch('/api/dashboard').then(setData).catch(console.error); }, []);
+function Dashboard({ cfg = RMAX_CFG }) {
+  const [data, setData]                        = useState(null);
+  const [selMonth, setSelMonth]                = useState('all');
+  const [selRegionMonth, setSelRegionMonth]    = useState('avg');
+  const [selPipelineMonth, setSelPipelineMonth]= useState('all');
+  useEffect(() => { apiFetch(cfg.dashboardBase).then(setData).catch(console.error); }, [cfg.dashboardBase]);
   if (!data) return React.createElement('div', {className:'p-8 text-gray-400'}, 'Loading…');
 
-  const { totals, by_location, by_month, by_status } = data;
+  const { totals, by_location, by_region, by_region_month, by_month, by_close_month, by_status } = data;
+  const hasRegions = !!(by_region && by_region.length > 0);
 
   // Build month lookup and sorted option list
   const monthMap = {};
-  by_month.forEach(r => { monthMap[r.month] = r; });
-  const monthOptions = [...by_month].reverse(); // most recent first
+  (by_month || []).forEach(r => { monthMap[r.month] = r; });
+  const monthOptions = [...(by_month || [])].reverse();
 
   // Active stats — either a specific month or all-time totals
   const active = selMonth !== 'all' && monthMap[selMonth]
@@ -289,6 +292,82 @@ function Dashboard() {
   const totalWon    = projData.reduce((s,r) => s + r.won,    0);
   const totalVerbal = projData.reduce((s,r) => s + r.verbal, 0);
   const totalAll    = projData.reduce((s,r) => s + (r.total||0), 0);
+
+  // ── Regional monthly chart data (RMAX only) ──
+  const rmData         = hasRegions ? (by_region_month || []) : [];
+  const REGION_ORDER_D = ['Central Texas','Southeast Texas','The Valley','(No Region)'];
+  const allRegionsD    = hasRegions ? [...new Set(rmData.map(r => r.region))] : [];
+  const allMonthsRM    = hasRegions ? [...new Set(rmData.map(r => r.month))].sort().reverse() : [];
+
+  const regionTotal = {};
+  allRegionsD.forEach(region => {
+    const rows = rmData.filter(r => r.region === region);
+    regionTotal[region] = rows.reduce((s, r) => s + r.count, 0);
+  });
+  const regionForMonth = {};
+  if (selRegionMonth !== 'avg') {
+    rmData.filter(r => r.month === selRegionMonth).forEach(r => { regionForMonth[r.region] = r.count; });
+  }
+  const rmChartData = hasRegions ? [
+    ...REGION_ORDER_D.filter(r => allRegionsD.includes(r)),
+    ...allRegionsD.filter(r => !REGION_ORDER_D.includes(r))
+  ].map(region => ({
+    region: region === '(No Region)' ? 'No Region' : region,
+    count: selRegionMonth === 'avg' ? (regionTotal[region] || 0) : (regionForMonth[region] || 0)
+  })) : [];
+
+  // ── Location chart data (Hydrotech / Glassworks) ──
+  const locationChartData = !hasRegions ? (by_location || []).map(r => ({
+    name: r.location || '(No Location)',
+    total: r.total || 0, won: r.won || 0, verbal: r.verbal || 0, count: r.count || 0,
+  })) : [];
+
+  // 12-Month Rolling Projected Sales chart data (by close_date)
+  const closeMap = {};
+  (by_close_month || []).forEach(r => { closeMap[r.month] = r; });
+  const projSalesData = Array.from({length:12}, (_,i) => {
+    const d = new Date(today.getFullYear(), today.getMonth() - 3 + i, 1);
+    const ym = d.toISOString().slice(0,7);
+    const label = d.toLocaleDateString('en-US',{month:'short',year:'2-digit'});
+    const row = closeMap[ym] || {};
+    return {
+      month: ym, name: label,
+      total:  row.total  || 0,
+      won:    row.won    || 0,
+      verbal: row.verbal || 0,
+      open:   row.open   || 0,
+      isFuture:  ym > currentYM,
+      isCurrent: ym === currentYM,
+    };
+  });
+  const projTotal  = projSalesData.reduce((s,r) => s + r.total,  0);
+  const projWon    = projSalesData.reduce((s,r) => s + r.won,    0);
+  const projVerbal = projSalesData.reduce((s,r) => s + r.verbal, 0);
+  const projOpen   = projSalesData.reduce((s,r) => s + r.open,   0);
+
+  // Pipeline chart data — region-based (RMAX) or location-based (others)
+  const pipelineChartData = hasRegions ? (() => {
+    const regionOrder = [
+      ...REGION_ORDER_D.filter(r => (by_region||[]).some(x => x.region === r || (r === '(No Region)' && x.region === '(No Region)'))),
+      ...(by_region||[]).map(x => x.region).filter(r => !REGION_ORDER_D.includes(r))
+    ];
+    if (selPipelineMonth === 'all') {
+      return (by_region || []).map(r => ({
+        region: r.region === '(No Region)' ? 'No Region' : r.region,
+        total: r.total, won: r.won, verbal: r.verbal
+      }));
+    }
+    const monthRows = rmData.filter(r => r.month === selPipelineMonth);
+    const byReg = {};
+    monthRows.forEach(r => { byReg[r.region] = r; });
+    const allPipelineRegions = [...new Set([...regionOrder, ...monthRows.map(r => r.region)])];
+    return allPipelineRegions.map(region => ({
+      region: region === '(No Region)' ? 'No Region' : region,
+      total:  (byReg[region] || {total:0}).total  || 0,
+      won:    (byReg[region] || {won:0}).won      || 0,
+      verbal: (byReg[region] || {verbal:0}).verbal || 0,
+    })).filter(r => r.total > 0 || r.won > 0 || r.verbal > 0);
+  })() : locationChartData.map(r => ({region: r.name, total: r.total, won: r.won, verbal: r.verbal}));
 
   return React.createElement('div', {className:'space-y-6'},
     // KPI row with month selector
@@ -367,16 +446,73 @@ function Dashboard() {
       )
     ),
 
-    // Bottom row: location chart + status table
+    // 12-Month Rolling Projected Sales (by close date)
+    React.createElement('div', {className:'card'},
+      React.createElement('div', {className:'flex items-center justify-between mb-1'},
+        React.createElement('h3', {className:'font-semibold text-gray-700'}, '12-Month Rolling Projected Sales'),
+        React.createElement('div', {className:'flex flex-wrap items-center gap-2 text-xs text-gray-500'},
+          React.createElement('span', {}, React.createElement('strong', {className:'text-blue-600'}, fmt(projTotal)), ' Pipeline'),
+          React.createElement('span', {}, React.createElement('strong', {className:'text-green-700'}, fmt(projWon)), ' Won'),
+          React.createElement('span', {}, React.createElement('strong', {className:'text-yellow-600'}, fmt(projVerbal)), ' Verbal'),
+          React.createElement('span', {}, React.createElement('strong', {className:'text-indigo-600'}, fmt(projOpen)), ' Open')
+        )
+      ),
+      React.createElement('p', {className:'text-xs text-gray-400 mb-4'}, 'Quote amounts by expected close date · 3 months past + 9 months ahead'),
+      React.createElement(ResponsiveContainer, {width:'100%', height:280},
+        React.createElement(ComposedChart, {data:projSalesData, margin:{top:10,right:20,left:10,bottom:5}},
+          React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+          React.createElement(XAxis, {dataKey:'name', tick:{fontSize:11}}),
+          React.createElement(YAxis, {tickFormatter:v=>'$'+Math.round(v/1000)+'k', tick:{fontSize:11}, width:52}),
+          React.createElement(Tooltip, {
+            formatter:(v,n)=>[fmt(v),n],
+            labelFormatter:(label,payload) => {
+              if (!payload || !payload[0]) return label;
+              const d = payload[0].payload;
+              return label + (d.isCurrent ? ' — Current Month' : d.isFuture ? ' — Projected' : ' — Actual');
+            }
+          }),
+          React.createElement(Legend),
+          React.createElement(ReferenceLine, {
+            x: new Date(today).toLocaleDateString('en-US',{month:'short',year:'2-digit'}),
+            stroke:'#94a3b8', strokeDasharray:'4 3', strokeWidth:1.5,
+            label:{value:'Today', position:'top', fontSize:10, fill:'#94a3b8'}
+          }),
+          React.createElement(Bar, {dataKey:'open',   name:'Open',   fill:'#c7d2fe', radius:[4,4,0,0], stackId:'a'}),
+          React.createElement(Bar, {dataKey:'verbal', name:'Verbal', fill:'#fef08a', radius:[0,0,0,0], stackId:'a'}),
+          React.createElement(Bar, {dataKey:'won',    name:'Won',    fill:'#bbf7d0', radius:[4,4,0,0], stackId:'a'}),
+          React.createElement(Line, {
+            dataKey:'total', name:'Total Pipeline', stroke:'#1F4E79',
+            strokeWidth:2.5, dot:{r:4, fill:'#1F4E79', strokeWidth:0}, activeDot:{r:6},
+            type:'monotone'
+          })
+        )
+      )
+    ),
+
+    // Bottom row: Pipeline + Quote count charts
     React.createElement('div', {className:'grid grid-cols-1 lg:grid-cols-2 gap-6'},
-      // By location
+      // Left: Pipeline by Region (RMAX) or Pipeline by Location (others)
       React.createElement('div', {className:'card'},
-        React.createElement('h3', {className:'font-semibold text-gray-700 mb-4'}, 'Pipeline by Location'),
+        React.createElement('div', {className:'flex items-center justify-between mb-4'},
+          React.createElement('h3', {className:'font-semibold text-gray-700'}, hasRegions ? 'Pipeline by Region' : 'Pipeline by Location'),
+          hasRegions && React.createElement('select', {
+            value: selPipelineMonth,
+            onChange: e => setSelPipelineMonth(e.target.value),
+            style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
+                   background:'#fff', color:'#374151', cursor:'pointer', width:'150px'},
+          },
+            React.createElement('option', {value:'all'}, 'All Time'),
+            allMonthsRM.map(m => {
+              const label = new Date(m + '-02').toLocaleDateString('en-US',{month:'short',year:'numeric'});
+              return React.createElement('option', {key:m, value:m}, label);
+            })
+          )
+        ),
         React.createElement(ResponsiveContainer, {width:'100%', height:260},
-          React.createElement(BarChart, {data:by_location.slice(0,10), layout:'vertical', margin:{top:5,right:10,left:80,bottom:5}},
+          React.createElement(BarChart, {data:pipelineChartData, layout:'vertical', margin:{top:5,right:10,left:130,bottom:5}},
             React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
             React.createElement(XAxis, {type:'number', tickFormatter:v=>'$'+Math.round(v/1000)+'k', tick:{fontSize:11}}),
-            React.createElement(YAxis, {type:'category', dataKey:'location', tick:{fontSize:10}, width:80}),
+            React.createElement(YAxis, {type:'category', dataKey:'region', tick:{fontSize:10}, width:130}),
             React.createElement(Tooltip, {formatter:(v,n)=>[fmt(v),n]}),
             React.createElement(Legend),
             React.createElement(Bar, {dataKey:'total',  name:'Total Quoted', fill:'#3b82f6', radius:[0,4,4,0]}),
@@ -386,25 +522,67 @@ function Dashboard() {
         )
       ),
 
-      // Status breakdown table
+      // Right: Total Quotes by Region (RMAX) or Quotes by Location (others)
       React.createElement('div', {className:'card'},
-        React.createElement('h3', {className:'font-semibold text-gray-700 mb-3'}, 'Status Breakdown'),
-        React.createElement('table', {className:'w-full text-sm'},
-          React.createElement('thead', {},
-            React.createElement('tr', {className:'text-left text-xs text-gray-500 uppercase border-b'},
-              React.createElement('th', {className:'pb-2 pr-4'}, 'Status'),
-              React.createElement('th', {className:'pb-2 pr-4 text-right'}, 'Count'),
-              React.createElement('th', {className:'pb-2 text-right'}, 'Amount')
+        hasRegions
+          ? React.createElement(React.Fragment, null,
+              React.createElement('div', {className:'flex items-center justify-between mb-1'},
+                React.createElement('h3', {className:'font-semibold text-gray-700'}, 'Total Quotes by Region'),
+                React.createElement('select', {
+                  value: selRegionMonth,
+                  onChange: e => setSelRegionMonth(e.target.value),
+                  style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
+                         background:'#fff', color:'#374151', cursor:'pointer', width:'170px'},
+                },
+                  React.createElement('option', {value:'avg'}, 'Overall (Year)'),
+                  allMonthsRM.map(m => {
+                    const label = new Date(m + '-02').toLocaleDateString('en-US',{month:'short',year:'numeric'});
+                    return React.createElement('option', {key:m, value:m}, label);
+                  })
+                )
+              ),
+              React.createElement('p', {className:'text-xs text-gray-400 mb-4'},
+                selRegionMonth === 'avg'
+                  ? 'Total number of quotes per region across all time'
+                  : 'Number of quotes per region for the selected month'
+              ),
+              React.createElement(ResponsiveContainer, {width:'100%', height:220},
+                React.createElement(BarChart, {data:rmChartData, margin:{top:20,right:20,left:10,bottom:5}},
+                  React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+                  React.createElement(XAxis, {dataKey:'region', tick:{fontSize:11}}),
+                  React.createElement(YAxis, {allowDecimals:false, tick:{fontSize:11}, width:35}),
+                  React.createElement(Tooltip, {formatter:(v)=>[v, 'Quotes']}),
+                  React.createElement(Bar, {dataKey:'count', name:'Quotes', radius:[4,4,0,0],
+                    label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#374151'}
+                  },
+                    rmChartData.map((entry, i) => {
+                      const REGION_COLORS = {
+                        'Central Texas':   '#3b82f6',
+                        'Southeast Texas': '#f97316',
+                        'The Valley':      '#16a34a',
+                        'No Region':       '#9ca3af',
+                      };
+                      return React.createElement(Cell, {key:i, fill: REGION_COLORS[entry.region] || '#6b7280'});
+                    })
+                  )
+                )
+              )
             )
-          ),
-          React.createElement('tbody', {},
-            by_status.map(r => React.createElement('tr', {key:r.status, className:'border-b border-gray-50'},
-              React.createElement('td', {className:'py-2 pr-4'}, React.createElement(StatusBadge, {status:r.status})),
-              React.createElement('td', {className:'py-2 pr-4 text-right text-gray-600'}, r.count),
-              React.createElement('td', {className:'py-2 text-right font-medium text-gray-700'}, fmt(r.amount))
-            ))
-          )
-        )
+          : React.createElement(React.Fragment, null,
+              React.createElement('h3', {className:'font-semibold text-gray-700 mb-1'}, 'Quotes by Location'),
+              React.createElement('p', {className:'text-xs text-gray-400 mb-4'}, 'Total number of quotes per location across all time'),
+              React.createElement(ResponsiveContainer, {width:'100%', height:220},
+                React.createElement(BarChart, {data:locationChartData, margin:{top:20,right:20,left:10,bottom:40}},
+                  React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+                  React.createElement(XAxis, {dataKey:'name', tick:{fontSize:10}, angle:-30, textAnchor:'end', interval:0}),
+                  React.createElement(YAxis, {allowDecimals:false, tick:{fontSize:11}, width:35}),
+                  React.createElement(Tooltip, {formatter:(v)=>[v, 'Quotes']}),
+                  React.createElement(Bar, {dataKey:'count', name:'Quotes', fill:'#0e7490', radius:[4,4,0,0],
+                    label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#374151'}
+                  })
+                )
+              )
+            )
       )
     )
   );
@@ -414,7 +592,7 @@ function Dashboard() {
 // Normalize state abbreviations for grouping/filtering
 const normLoc = s => (s || '(No Location)').replace(/,?\s+([a-zA-Z]{2})$/, (_, st) => ', ' + st.toUpperCase());
 
-function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
+function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
   const { quotesBase, exportUrl, dashboardBase } = cfg;
   const [quotes, setQuotes]             = useState([]);
   const [loading, setLoading]           = useState(true);
@@ -423,6 +601,9 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
   const [deleting, setDeleting]         = useState(null);
   const [salesforceOnly, setSalesforceOnly] = useState(false);
   const [pdfUploading, setPdfUploading] = useState({});
+  const [viewMode, setViewMode]         = useState('detail');
+  const [sortCol, setSortCol]           = useState('date_received');
+  const [sortAsc, setSortAsc]           = useState(false);
   const searchRef = useRef();
   const QUOTE_REGION_ORDER = cfg.regions || ['Central Texas','Southeast Texas','The Valley'];
 
@@ -458,6 +639,30 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
   const setFilter = (k,v) => setFilters(f => ({...f,[k]:v}));
 
   return React.createElement('div', {className:'space-y-4'},
+    // Dashboard banner button
+    onDashboard && React.createElement('div', {style:{display:'flex', justifyContent:'flex-end', marginBottom:'4px'}},
+      React.createElement('button', {
+        onClick: onDashboard,
+        style:{
+          background:'linear-gradient(135deg,#1F4E79,#2e6fad)',
+          color:'#fff',
+          border:'none',
+          borderRadius:'10px',
+          padding:'8px 18px',
+          fontSize:'13px',
+          fontWeight:700,
+          letterSpacing:'0.5px',
+          cursor:'pointer',
+          boxShadow:'0 4px 12px rgba(31,78,121,0.35)',
+          display:'flex',
+          alignItems:'center',
+          gap:'8px'
+        }
+      },
+        React.createElement('span', {style:{fontSize:'15px'}}, '📊'),
+        'RMAX Dashboard'
+      )
+    ),
     // Toolbar row 1: search + status + actions
     React.createElement('div', {className:'flex flex-wrap gap-2 items-center'},
       React.createElement('input', {
@@ -476,6 +681,15 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
         ['All','Won','Verbal','Lost','Not Awarded','Unlikely','Duplicate'].map(s =>
           React.createElement('option',{key:s,value:s},s)
         )
+      ),
+      React.createElement('select', {
+        value: viewMode,
+        onChange: e => setViewMode(e.target.value),
+        className: 'px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium',
+        style: {background: viewMode==='list' ? '#f0fdf4' : '#fff', color:'#374151'}
+      },
+        React.createElement('option', {value:'detail'}, '☰ Detail View'),
+        React.createElement('option', {value:'list'}, '⊞ List View')
       ),
       React.createElement('div', {className:'flex items-center gap-3 ml-auto'},
         syncMsg && React.createElement('span', {className:'text-sm text-green-600 font-medium'}, syncMsg),
@@ -507,7 +721,7 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
           className:'btn btn-primary flex items-center gap-2',
           onClick: onRefresh,
           disabled: syncing
-        }, syncing ? '⟳ Syncing…' : '↻ Refresh Quotes')
+        }, syncing ? '⟳ Syncing…' : '↻ Refresh Quotes'),
       )
     ),
     // Toolbar row 2: region tabs
@@ -531,16 +745,91 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
       )
     ),
 
-    // Cards layout
+    // Cards layout (or List View)
     (() => {
       if (loading) return React.createElement('p', {className:'text-center py-12 text-gray-400'}, 'Loading…');
       if (quotes.length === 0) return React.createElement('p', {className:'text-center py-12 text-gray-400'}, 'No quotes found.');
-
 
       // Apply region filter + salesforce filter then group by region
       const visibleQuotes = quotes
         .filter(q => regionFilter === 'All' || ((q.region||'').trim()||'(No Region)') === regionFilter)
         .filter(q => !salesforceOnly || q.add_to_salesforce);
+
+      // ── List View ──
+      if (viewMode === 'list') {
+        const toggleSort = col => { if (sortCol===col) setSortAsc(a=>!a); else { setSortCol(col); setSortAsc(true); } };
+        const fmtAmtL  = v => v != null && v !== '' ? '$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
+        const fmtDateL = s => { if (!s) return '—'; const d = new Date(s+'T00:00:00'); return isNaN(d)?s:d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}); };
+        const SC = {Won:'#16a34a',Verbal:'#ca8a04',Lost:'#dc2626','Not Awarded':'#ea580c',Unlikely:'#7c3aed',Duplicate:'#6b7280',Open:'#2563eb','No Decision':'#6b7280'};
+        const SB = {Won:'#dcfce7',Verbal:'#fef9c3',Lost:'#fee2e2','Not Awarded':'#ffedd5',Unlikely:'#ede9fe',Duplicate:'#f3f4f6',Open:'#dbeafe','No Decision':'#f3f4f6'};
+        const RB = {Won:'#dcfce7',Lost:'#fee2e2',Duplicate:'#f3f4f6'};
+        const COLS = [
+          {key:'job_name',      label:'Job / Project', w:'22%'},
+          {key:'customer',      label:'Customer',      w:'16%'},
+          {key:'location',      label:'Location',      w:'13%'},
+          {key:'sent_to',        label:'Sent To',       w:'11%'},
+          {key:'product',       label:'Product',       w:'9%'},
+          {key:'amount',        label:'Amount',        w:'8%', right:true},
+          {key:'close_date',    label:'Close',         w:'8%'},
+          {key:'date_received', label:'Received',      w:'8%'},
+          {key:'status',        label:'Status',        w:'9%'},
+        ];
+        const sorted = [...visibleQuotes].sort((a,b) => {
+          let av=a[sortCol], bv=b[sortCol];
+          if (sortCol==='amount'){av=Number(av)||0;bv=Number(bv)||0;}
+          else{av=(av||'').toString().toLowerCase();bv=(bv||'').toString().toLowerCase();}
+          if(av<bv)return sortAsc?-1:1;
+          if(av>bv)return sortAsc?1:-1;
+          return 0;
+        });
+        return React.createElement('div',{style:{background:'#fff',borderRadius:'12px',boxShadow:'0 1px 3px rgba(0,0,0,0.07)',overflow:'hidden'}},
+          React.createElement('div',{style:{overflowX:'auto'}},
+            React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',tableLayout:'fixed'}},
+              React.createElement('thead',null,
+                React.createElement('tr',{style:{background:'#f8fafc',borderBottom:'2px solid #e2e8f0'}},
+                  COLS.map(c=>React.createElement('th',{
+                    key:c.key, onClick:()=>toggleSort(c.key),
+                    style:{width:c.w,padding:'9px 12px',fontSize:'11px',fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'0.05em',textAlign:c.right?'right':'left',cursor:'pointer',userSelect:'none',whiteSpace:'nowrap'}
+                  },
+                    c.label,
+                    React.createElement('span',{style:{marginLeft:'3px',color:sortCol===c.key?'#1F4E79':'#d1d5db'}},sortCol===c.key?(sortAsc?'↑':'↓'):'⇅')
+                  ))
+                )
+              ),
+              React.createElement('tbody',null,
+                sorted.length===0
+                  ? React.createElement('tr',null,React.createElement('td',{colSpan:COLS.length,style:{padding:'40px',textAlign:'center',color:'#94a3b8'}},'No quotes found'))
+                  : sorted.map((q,i)=>{
+                      const isDup=q.status==='Duplicate';
+                      const bg=RB[q.status]||(i%2===0?'#fff':'#fafafa');
+                      const hbg=q.status==='Won'?'#bbf7d0':q.status==='Lost'?'#fecaca':isDup?'#e5e7eb':'#eff6ff';
+                      return React.createElement('tr',{
+                        key:q.id, onClick:()=>onEdit(q),
+                        style:{background:bg,cursor:'pointer',borderBottom:'1px solid #f1f5f9',...(isDup?{opacity:0.55,textDecoration:'line-through'}:{})},
+                        onMouseEnter:e=>e.currentTarget.style.background=hbg,
+                        onMouseLeave:e=>e.currentTarget.style.background=bg
+                      },
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'13px',fontWeight:600,color:'#0f172a',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},
+                          q.status==='Won' && React.createElement('span',{style:{color:'#f59e0b',marginRight:'5px',fontSize:'14px',lineHeight:1}},'★'),
+                          q.job_name||q.subject||'—'
+                        ),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#334155',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},q.customer||'—'),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},q.location||'—'),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},q.sent_to||'—'),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},q.product||'—'),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'13px',fontWeight:700,color:'#1d4ed8',textAlign:'right',whiteSpace:'nowrap'}},fmtAmtL(q.amount)),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',whiteSpace:'nowrap'}},fmtDateL(q.close_date)),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',whiteSpace:'nowrap'}},fmtDateL(q.date_received)),
+                        React.createElement('td',{style:{padding:'8px 12px'}},
+                          React.createElement('span',{style:{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'99px',background:SB[q.status]||'#f1f5f9',color:SC[q.status]||'#94a3b8',textDecoration:'none',opacity:1,display:'inline-block'}},q.status||'—')
+                        )
+                      );
+                    })
+              )
+            )
+          )
+        );
+      }
 
       const grouped = {};
       visibleQuotes.forEach(q => {
@@ -679,45 +968,63 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
                   q.notes ? React.createElement('div', {className:'mt-2'},
                     F('Notes', q.notes)
                   ) : null,
-                  // PDF attachment (Hydrotech only)
-                  cfg.label === 'Hydrotech' ? React.createElement('div', {className:'mt-3', style:{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}},
-                    q.pdf_filename ? React.createElement('a', {
-                      href: `/api/hydrotech-pdf/${encodeURIComponent(q.pdf_filename)}`,
-                      target: '_blank',
-                      rel: 'noopener noreferrer',
-                      onClick: e => e.stopPropagation(),
-                      className: 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white',
-                      style: {background: '#16a34a'}
-                    }, '📄 View PDF Quote') : null,
-                    // Hidden file input for PDF upload
+                  // PDF attachments (Hydrotech only — supports multiple)
+                  cfg.label === 'Hydrotech' ? React.createElement('div', {className:'mt-3'},
+                    // List existing PDFs
+                    (q.pdfs && q.pdfs.length > 0) ? React.createElement('div', {style:{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'6px'}},
+                      q.pdfs.map(pdf => React.createElement('div', {key: pdf.id, style:{display:'flex',alignItems:'center',gap:'4px'}},
+                        React.createElement('a', {
+                          href: `/api/hydrotech-pdf/${encodeURIComponent(pdf.filename)}`,
+                          target: '_blank',
+                          rel: 'noopener noreferrer',
+                          onClick: e => e.stopPropagation(),
+                          className: 'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium text-white',
+                          style: {background:'#16a34a'}
+                        }, `📄 ${pdf.filename.replace(/^\d+_/, '')}`),
+                        React.createElement('button', {
+                          onClick: async e => {
+                            e.stopPropagation();
+                            if (!confirm('Remove this PDF?')) return;
+                            const r = await fetch(`/api/hydrotech-pdfs/${pdf.id}`, {method:'DELETE'});
+                            if (r.ok) { onRefresh && onRefresh(); }
+                          },
+                          title: 'Remove PDF',
+                          className: 'inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold',
+                          style: {background:'#fee2e2', color:'#dc2626', border:'none', cursor:'pointer', flexShrink:0}
+                        }, '×')
+                      ))
+                    ) : null,
+                    // Hidden file input
                     React.createElement('input', {
                       type: 'file',
                       accept: 'application/pdf',
+                      multiple: true,
                       id: `pdf-upload-${q.id}`,
                       style: {display:'none'},
                       onClick: e => e.stopPropagation(),
                       onChange: async e => {
-                        const file = e.target.files[0];
-                        if (!file) return;
+                        const files = Array.from(e.target.files);
+                        if (!files.length) return;
                         e.stopPropagation();
                         setPdfUploading(u => ({...u, [q.id]: true}));
                         try {
-                          const fd = new FormData();
-                          fd.append('file', file);
-                          const r = await fetch(`/api/hydrotech-quotes/${q.id}/upload-pdf`, {method:'POST', body: fd});
-                          if (r.ok) { onRefresh && onRefresh(); }
-                          else { alert('Upload failed'); }
+                          for (const file of files) {
+                            const fd = new FormData();
+                            fd.append('file', file);
+                            await fetch(`/api/hydrotech-quotes/${q.id}/upload-pdf`, {method:'POST', body: fd});
+                          }
+                          onRefresh && onRefresh();
                         } catch(err) { alert('Upload error: ' + err.message); }
                         finally { setPdfUploading(u => ({...u, [q.id]: false})); e.target.value=''; }
                       }
                     }),
-                    // Attach / Replace PDF button
+                    // Attach PDF button
                     React.createElement('button', {
                       onClick: e => { e.stopPropagation(); document.getElementById(`pdf-upload-${q.id}`).click(); },
                       disabled: pdfUploading[q.id],
                       className: 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium',
                       style: {background:'#f3f4f6', color:'#374151', border:'1px solid #d1d5db', cursor:'pointer'}
-                    }, pdfUploading[q.id] ? '⏳ Uploading…' : (q.pdf_filename ? '🔄 Replace PDF' : '📎 Attach PDF'))
+                    }, pdfUploading[q.id] ? '⏳ Uploading…' : '📎 Attach PDF')
                   ) : null
                 );
               })
@@ -734,6 +1041,8 @@ function QuoteList({ onEdit, onNew, refresh, onRefresh, syncing, syncMsg, cfg = 
     })
   );
 }
+
+
 
 // ── SPECFORM Overall Sales tab ────────────────────────────────────────────────
 const PRODUCT_COLORS = {
@@ -1165,7 +1474,7 @@ function CustomerDirectory() {
     setImporting(true);
     apiFetch('/api/contacts/import-from-quotes', {method:'POST'})
       .then(data => {
-        setImportMsg(`✓ ${data.inserted} new contact${data.inserted===1?'':'s'} imported, ${data.skipped} already existed`);
+        setImportMsg(`✓ ${data.inserted} new, ${data.updated||0} updated, ${data.skipped} unchanged`);
         loadContacts();
       })
       .catch(() => setImportMsg('❌ Import failed'))
@@ -1701,26 +2010,25 @@ function App() {
           className:`tab ${tab==='quotes'?'tab-active':'tab-inactive'}`,
           onClick:()=>setTab('quotes')
         }, React.createElement('span', {style:{display:'flex',alignItems:'center',gap:'6px'}},
-            React.createElement('img', {src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABoAAAAWCAYAAADeiIy1AAAEcElEQVR42r2VXYhVVRTHf2ufc8+9d+beGD8KCTIltFCMfJA+wLToYbCHULnj90hFVi8lGNZDcL1YERkyDAhpgqlj4txxMOihlNSnyIeI8KOECnOS/GAcZ+Z655x7z96rh3OpccYR66EF62GftfZZe6//f/23kJhQ6Db8V5tTUEooiPK/WKHbmyjkNxJyiJuNdYpnZVyW9RSwgIcXO6waPCNYT0kBpCz+yK90td0EldvdLClkawvINh9HQ0h2jjIF34CfgTgCvxkkArXgCTiAGOJMH4WuTsryMcWioVTSZHNiCS6iirMKzqJW//FYUXWgNWpDm9HwMaLKa2ArgEviVlEL6h4gO3kbha73KJXcWMxHLwRF4Ba3BE0Gaz+hvG4b3e0/0rNmJy5+Hz9rGu0UEHCxJbxhQd7hhT0zKLdZikVza+smtAZcYr6l0B0Q5DI0940w4H3f6MooPMXDOYefNgTxg8AFzs2Vuyykgiqoc/SsqgE1ANoOtKMag9hRMFj8IMDWBqnnzwBCueDuslDj0CIRha4VpHKzqFeeIMg/jyoEOR8UVEGMh6vXQF/lyLJ+Ct0eZbF3X0gERCNwKTL3bEWAcOg7hJ9AfVTSeL6Ad5G4eoDD639IWNdmx9P7jt1zoNpCuf0Qy/e+TpDbgfGngPsDkWOE4Wl61t74O7+ohpK4YhGzZQsqMhrM5fsXE2RPUI8cMpqJakk1e9QrBeb80kup5Fi2bwNNLTsb2EF9JAJ+x/hncXEv5dVdjTly4+ltXDL5QgzacOKEvhojqpRKSqE7S2/7LqKhfTgbUa9WwQUYMxuRpaTz+6Wwfyulknv509ZH3+15blZRiwZFkkLWTxE0e6SaA4K8n3jOx88mazVpQBnOuURizBHS+TR+pokgJ/hZMB5iDBqnNi7ZtvbxOTPCk0/OqmVKUnLd5YJJMEqZ89RubqYeDYHLNtQiAtOMYjHeKQDylRhEMQfPEg5sJ47SiFcFjVA1Rm/6Ns7V7p8yvCKfl0mXhtyHHccWnu6zgx8lN9J4Gl5mFcY8TM+6DnrWdSCpR0i3rMZWrmBtJ22HzkPtDIWun1HTi61Nx9BF0PQU4v1GaHdq6p6FQN+CmZd7L12DwVTLksuD3tVNrUevN1hnJoObT9PU+RQOOBQlO+kN6iOANw/kWYg/B/2iwZHl+Nl2st5LDFcPYrzd5JpjjaLjRPRsWHwq/ODLRduv9YXV7FTtRBG/QWGfaMgSDXeQzm9CPKj2l4A3UfERhsB7BvShxmxNJw5j/EpIaL4mm6+RyWW0cvUkR9uvT3tl18wruzdsuo2omgri/wmptwmHOwkH9lFeswXVfsRdRelH4w4IVkKwEmd3ABe50TSP3ORvEPmK6rWNpHMllne9dWUg93R6/Z4ZxROLfEiENZmjYtFwbm6actvImBczy9V768y44LP3xfAWDWztDPCn5pk6JctnrX0ALD18HzKSxQv6mXO2OnaWxgspKv86dodn/DY/mejbhDFpvDky5iDj8v8C1XIGwtU3gf0AAAAASUVORK5CYII=', height:'22', style:{objectFit:'contain'}}),
+            React.createElement('img', {src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABoAAAAWCAYAAADeiIy1AAAEcElEQVR42r2VXYhVVRTHf2ufc8+9d+beGD8KCTIltFCMfJA+wLToYbCHULnj90hFVi8lGNZDcL1YERkyDAhpgqlj4txxMOihlNSnyIeI8KOECnOS/GAcZ+Z655x7z96rh3OpccYR66EF62GftfZZe6//f/23kJhQ6Db8V5tTUEooiPK/WKHbmyjkNxJyiJuNdYpnZVyW9RSwgIcXO6waPCNYT0kBpCz+yK90td0EldvdLClkawvINh9HQ0h2jjIF34CfgTgCvxkkArXgCTiAGOJMH4WuTsryMcWioVTSZHNiCS6iirMKzqJW//FYUXWgNWpDm9HwMaLKa2ArgEviVlEL6h4gO3kbha73KJXcWMxHLwRF4Ba3BE0Gaz+hvG4b3e0/0rNmJy5+Hz9rGu0UEHCxJbxhQd7hhT0zKLdZikVza+smtAZcYr6l0B0Q5DI0940w4H3f6MooPMXDOYefNgTxg8AFzs2Vuyykgiqoc/SsqgE1ANoOtKMag9hRMFj8IMDWBqnnzwBCueDuslDj0CIRha4VpHKzqFeeIMg/jyoEOR8UVEGMh6vXQF/lyLJ+Ct0eZbF3X0gERCNwKTL3bEWAcOg7hJ9AfVTSeL6Ad5G4eoDD639IWNdmx9P7jt1zoNpCuf0Qy/e+TpDbgfGngPsDkWOE4Wl61t74O7+ohpK4YhGzZQsqMhrM5fsXE2RPUI8cMpqJakk1e9QrBeb80kup5Fi2bwNNLTsb2EF9JAJ+x/hncXEv5dVdjTly4+ltXDL5QgzacOKEvhojqpRKSqE7S2/7LqKhfTgbUa9WwQUYMxuRpaTz+6Wwfyulknv509ZH3+15blZRiwZFkkLWTxE0e6SaA4K8n3jOx88mazVpQBnOuURizBHS+TR+pokgJ/hZMB5iDBqnNi7ZtvbxOTPCk0/OqmVKUnLd5YJJMEqZ89RubqYeDYHLNtQiAtOMYjHeKQDylRhEMQfPEg5sJ47SiFcFjVA1Rm/6Ns7V7p8yvCKfl0mXhtyHHccWnu6zgx8lN9J4Gl5mFcY8TM+6DnrWdSCpR0i3rMZWrmBtJ22HzkPtDIWun1HTi61Nx9BF0PQU4v1GaHdq6p6FQN+CmZd7L12DwVTLksuD3tVNrUevN1hnJoObT9PU+RQOOBQlO+kN6iOANw/kWYg/B/2iwZHl+Nl2st5LDFcPYrzd5JpjjaLjRPRsWHwq/ODLRduv9YXV7FTtRBG/QWGfaMgSDXeQzm9CPKj2l4A3UfERhsB7BvShxmxNJw5j/EpIaL4mm6+RyWW0cvUkR9uvT3tl18wruzdsuo2omgri/wmptwmHOwkH9lFeswXVfsRdRelH4w4IVkKwEmd3ABe50TSP3ORvEPmK6rWNpHMllne9dWUg93R6/Z4ZxROLfEiENZmjYtFwbm6actvImBczy9V768y44LP3xfAWDWztDPCn5pk6JctnrX0ALD18HzKSxQv6mXO2OnaWxgspKv86dodn/DY/mejbhDFpvDky5iDj8v8C1XIGwtU3gf0AAAAASUVORK5CYII=', height:'22', style:{objectFit:'contain', filter: tab==='quotes' ? 'brightness(0) invert(1)' : 'none'}}),
             'RMAX Quotes'
           )),
-        React.createElement('button', {
-          className:`tab ${tab==='dashboard'?'tab-active':'tab-inactive'}`,
-          onClick:()=>setTab('dashboard')
-        }, '📊 RMAX Dashboard'),
         React.createElement('button', {
           className:`tab ${tab==='hydrotech'?'tab-active':'tab-inactive'}`,
           style: tab==='hydrotech' ? {background:'#16a34a'} : {},
           onClick:()=>setTab('hydrotech')
         }, React.createElement('span', {style:{display:'flex',alignItems:'center',gap:'6px'}},
-            React.createElement('img', {src:'data:image/png;base64,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', height:'22', style:{objectFit:'contain'}}),
+            React.createElement('img', {src:'data:image/png;base64,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', height:'22', style:{objectFit:'contain', filter: tab==='hydrotech' ? 'brightness(0) invert(1)' : 'none'}}),
             'Hydrotech Quotes'
           )),
         React.createElement('button', {
           className:`tab ${tab==='glassworks'?'tab-active':'tab-inactive'}`,
           style: tab==='glassworks' ? {background:'#0e7490'} : {},
           onClick:()=>setTab('glassworks')
-        }, '🪟 Glassworks Quotes'),
+        }, React.createElement('span', {style:{display:'flex',alignItems:'center',gap:'6px'}},
+            React.createElement('img', {src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAAFaUlEQVR42u2Xy24cxxmFv7+quqd7LpzhZRiKom0Ksi3ZBhIYWWWbII+RF8gyz5OHyC7ZZR1kESBRYMSwYomSSHE0nHvfu6qy6CHNUUTDBmJFBng2U6jqQp8+//kvA7e4xS1+3BDvvQD6HeVn330Fsyy7F0XRLwAPSGkt1kIcrkW1lvItS6y19oDkef4XEwTBL4HfXx6GWvNFBUOgDwRaE/6f1AuC4LcGKIC6ss799bxQgRZCBatSM7ae2kOshZ1Isd36RkfnHApwPwAxpZQDFFAYQABTO+/6kVaHbc3JqqZyzUFbCyLCKHOcLGu6geJOWxMbaTzxAxB0zjmllAJEbTAXwXqIjfDRIOCoawi1UDoP3vNBzxAq4dFFifNvJ8wbBPEekSZdPNAJhKOu4cEgoHKwLD3v9RrStVs/21zb+P229dXedyRoXr90GTKBRiXvUUq43zcoETyej7dDLpNcBEQEv37u8tUi0jATQaTxrKzXIAjgvf9+BOXyu+S6YeHRsyWf3u3yr9MlDtiKDP12SBgIaeEYzXPuH3T46mzJ8X6btLB4Dy/nBaER4tCwKmp2OgHnswKlhPf32vQi/T1DfNVeGj2VCIu05uUsZzQvUErx2dEWp9OcF5OUi2XFKq84nxeMFyVZ5fjyNGGWVHw9SvnsqMfxsMM0KREPRgndSPPwsMuTUbJW/jsSFN7sma/OU3a7AU9fJRSVZZaUDDohIsLJq5SssPQizZNRwqATst8L+fJ0SStQzNOKVWHxXmgFCu+hqByrvCY0m9qIyBsrgrnuPy1CUTnO5yUf74TUznNvPyYONfO0YpHWnM0KjodtvPf02wG9SGO0Iq8sy9yy22/x0w+22O62eHaR044MRzst/v0qJQoUgVE8GWd8cthtfCuN17PKEmjBKLmBoAclsMxqJqsC6KIF8spxsaroRppBL6QdauJQ83xaYrSmsJ4X85ytyFA5eDEr2YpDVoWj3dLs9QKeTwvu7nawztOOFO3IcDYvMUYTaRivKkQJO52AvY7ZiKC6nsOl9evMar6idp5pUvPhTzo4B5NVhVsXwElSMVrkAPQig1JCaBTtQLFIa2ZZTVrD1+MSa+GwH9KPDU8nBbO0xno4m2acTAve342INDjr/qv8XBF0HqarChFBr2XWqvHO04uMl8uSpLBM04rn05x2IGzFhtGywnnP2bzE45lnNdZ5cI5eSyN4ui3hZJLzalmy1zH0Io1WwnYn4LAfcjIpUFpxkdQ3e9Baz2hRsh/HG4X3eC9mklTs9wKUEmZpTRRojrbNlXdXFRxtN4X8oC8E6htfHw6aUWOaO7otRfCGTBj2ISk9h9uCeL+RsWazBzbR9XicB62a/B72Qv74zwk/u9vh8Tjj5+91OTsbYUzAYrGkHYW4boeqLMk8GGOYzRbcuTPkYjzFOs/OoMt0XhCEIXleUJU12miUUmitUALSiuj22t9WqNdjzvrCaFnxeJxzNi/Ia7hIav72POXzow6L+ZLxZEma5cRxi2SVMNzfZTFPqOsKax2T6ZwwDJhM5vxjlbLd77HKcnZ2BpR5iVJCXpTEUUSWFxwcDPnk4THOuZtbnVHCJKn50xdT5pnFrFuTwfHoNOHXDwd0o4AHD+/zYHMCoRlAru9dtr/rNdY3bfAGvH5u1rxsaMQ9Hmd+lhSEWlPXTX9FhIOtgI+GEftbrSsyvNZLtRaccxt7IoK17mp9+XLv/Y19eE3OrXl5A4SAjkOjf/eru2QW/vD3hMNhzL09xbZ540B5w6D5v5v6Lwd8o7V+BvzZOeeNUtIWx28+j68qkHWuSRjhbcIrpcR7f/Kj+V8s7yg/zy1ucYtb3OLdxn8Ajkid74lmsDIAAAAASUVORK5CYII=', height:'22', style:{objectFit:'contain', filter: tab==='glassworks' ? 'brightness(0) invert(1)' : 'none'}}),
+            'Glassworks Quotes'
+          )),
         React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           style:{marginLeft:'auto'},
@@ -1731,23 +2039,27 @@ function App() {
 
     // Content
     React.createElement('main', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-6'},
-      tab === 'dashboard' ? React.createElement(Dashboard, {key:refresh})
-      : tab === 'sales'      ? React.createElement(SalesTab)
-      : tab === 'directory'  ? React.createElement(CustomerDirectory, {key:'dir'})
-      : tab === 'hydrotech' ? React.createElement(QuoteList, {
+      tab === 'dashboard'           ? React.createElement(Dashboard, {key:'rmax-dash',    cfg: RMAX_CFG})
+      : tab === 'hydrotech-dashboard' ? React.createElement(Dashboard, {key:'ht-dash',      cfg: HYDROTECH_CFG})
+      : tab === 'glassworks-dashboard'? React.createElement(Dashboard, {key:'gw-dash',      cfg: GLASSWORKS_CFG})
+      : tab === 'sales'               ? React.createElement(SalesTab)
+      : tab === 'directory'           ? React.createElement(CustomerDirectory, {key:'dir'})
+      : tab === 'hydrotech'           ? React.createElement(QuoteList, {
           key: 'hydrotech',
           refresh,
           onEdit: q => openEdit(q, HYDROTECH_CFG),
           onNew: () => openEdit({}, HYDROTECH_CFG),
+          onDashboard: () => setTab('hydrotech-dashboard'),
           onRefresh: () => doRefresh(HYDROTECH_CFG),
           syncing, syncMsg,
           cfg: HYDROTECH_CFG,
         })
-      : tab === 'glassworks' ? React.createElement(QuoteList, {
+      : tab === 'glassworks'          ? React.createElement(QuoteList, {
           key: 'glassworks',
           refresh,
           onEdit: q => openEdit(q, GLASSWORKS_CFG),
           onNew: () => openEdit({}, GLASSWORKS_CFG),
+          onDashboard: () => setTab('glassworks-dashboard'),
           onRefresh: () => doRefresh(GLASSWORKS_CFG),
           syncing, syncMsg,
           cfg: GLASSWORKS_CFG,
@@ -1756,6 +2068,8 @@ function App() {
           key: 'rmax',
           refresh,
           onEdit: q => openEdit(q, RMAX_CFG),
+          onNew: () => openEdit({}, RMAX_CFG),
+          onDashboard: () => setTab('dashboard'),
           onRefresh: () => doRefresh(RMAX_CFG),
           syncing, syncMsg,
           cfg: RMAX_CFG,

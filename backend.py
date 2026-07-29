@@ -1797,6 +1797,7 @@ def hydrotech_dashboard():
         """).fetchone()
         by_loc = con.execute("""
             SELECT location,
+                COUNT(*) as count,
                 COALESCE(SUM(amount),0) as total,
                 COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
                 COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
@@ -1826,12 +1827,105 @@ def hydrotech_dashboard():
         locations = [r[0] for r in con.execute(
             "SELECT DISTINCT location FROM hydrotech_quotes WHERE location IS NOT NULL ORDER BY location"
         ).fetchall()]
+        raw_close_ht = con.execute(
+            "SELECT close_date, status, amount FROM hydrotech_quotes "
+            "WHERE (deleted IS NULL OR deleted=0) AND close_date IS NOT NULL AND close_date != ''"
+        ).fetchall()
+        from collections import defaultdict as _dd2
+        close_acc_ht = _dd2(lambda: dict(total=0.0, won=0.0, verbal=0.0, open=0.0))
+        for row in raw_close_ht:
+            dt = parse_date(row["close_date"])
+            if not dt: continue
+            ym = dt.strftime('%Y-%m')
+            amt = float(row["amount"] or 0)
+            st = (row["status"] or '').strip()
+            if st in ('Lost', 'Duplicate'): continue
+            close_acc_ht[ym]['total'] += amt
+            if st == 'Won':     close_acc_ht[ym]['won']    += amt
+            elif st == 'Verbal': close_acc_ht[ym]['verbal'] += amt
+            else:                close_acc_ht[ym]['open']   += amt
+        by_close_month_ht = [{'month': k, 'total': round(v['total'], 2), 'won': round(v['won'], 2),
+                               'verbal': round(v['verbal'], 2), 'open': round(v['open'], 2)}
+                              for k, v in sorted(close_acc_ht.items())]
         return {
             "totals": dict(totals),
             "by_location": [dict(r) for r in by_loc],
             "by_month": [dict(r) for r in by_month],
             "by_status": [dict(r) for r in by_status],
             "locations": locations,
+            "by_close_month": by_close_month_ht,
+        }
+
+@app.get("/api/glassworks-dashboard")
+def glassworks_dashboard():
+    with get_db() as con:
+        totals = con.execute("""
+            SELECT
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total_amount,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won_amount,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal_amount,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost_amount
+            FROM glassworks_quotes WHERE (deleted IS NULL OR deleted=0)
+        """).fetchone()
+        by_loc = con.execute("""
+            SELECT location,
+                COUNT(*) as count,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
+            FROM glassworks_quotes WHERE (deleted IS NULL OR deleted=0) AND location IS NOT NULL
+            GROUP BY location ORDER BY total DESC
+        """).fetchall()
+        by_month = con.execute("""
+            SELECT substr(date_received,1,7) as month,
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count
+            FROM glassworks_quotes
+            WHERE (deleted IS NULL OR deleted=0) AND date_received IS NOT NULL AND date_received != ''
+              AND substr(date_received,1,7) >= substr(date('now','-11 months'),1,7)
+            GROUP BY month ORDER BY month
+        """).fetchall()
+        by_status = con.execute("""
+            SELECT status, COUNT(*) as count, COALESCE(SUM(amount),0) as amount
+            FROM glassworks_quotes WHERE (deleted IS NULL OR deleted=0) AND status IS NOT NULL
+            GROUP BY status ORDER BY amount DESC
+        """).fetchall()
+        raw_close_gw = con.execute(
+            "SELECT close_date, status, amount FROM glassworks_quotes "
+            "WHERE (deleted IS NULL OR deleted=0) AND close_date IS NOT NULL AND close_date != ''"
+        ).fetchall()
+        from collections import defaultdict as _dd3
+        close_acc_gw = _dd3(lambda: dict(total=0.0, won=0.0, verbal=0.0, open=0.0))
+        for row in raw_close_gw:
+            dt = parse_date(row["close_date"])
+            if not dt: continue
+            ym = dt.strftime('%Y-%m')
+            amt = float(row["amount"] or 0)
+            st = (row["status"] or '').strip()
+            if st in ('Lost', 'Duplicate'): continue
+            close_acc_gw[ym]['total'] += amt
+            if st == 'Won':      close_acc_gw[ym]['won']    += amt
+            elif st == 'Verbal': close_acc_gw[ym]['verbal'] += amt
+            else:                close_acc_gw[ym]['open']   += amt
+        by_close_month_gw = [{'month': k, 'total': round(v['total'], 2), 'won': round(v['won'], 2),
+                               'verbal': round(v['verbal'], 2), 'open': round(v['open'], 2)}
+                              for k, v in sorted(close_acc_gw.items())]
+        return {
+            "totals": dict(totals),
+            "by_location": [dict(r) for r in by_loc],
+            "by_month": [dict(r) for r in by_month],
+            "by_status": [dict(r) for r in by_status],
+            "by_close_month": by_close_month_gw,
         }
 
 # ── Contacts ─────────────────────────────────────────────────────────────────
