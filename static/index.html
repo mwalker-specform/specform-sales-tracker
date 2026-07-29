@@ -1975,10 +1975,6 @@ function App() {
             'RMAX Quotes'
           )),
         React.createElement('button', {
-          className:`tab ${tab==='dashboard'?'tab-active':'tab-inactive'}`,
-          onClick:()=>setTab('dashboard')
-        }, '📊 RMAX Dashboard'),
-        React.createElement('button', {
           className:`tab ${tab==='hydrotech'?'tab-active':'tab-inactive'}`,
           style: tab==='hydrotech' ? {background:'#16a34a'} : {},
           onClick:()=>setTab('hydrotech')
