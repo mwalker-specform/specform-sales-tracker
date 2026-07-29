@@ -1918,6 +1918,452 @@ function CustomerDirectory() {
   );
 }
 
+// ── Company Accounts ──────────────────────────────────────────────────────────
+function CompanyAccounts() {
+  const [companies,     setCompanies]     = useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [search,        setSearch]        = useState('');
+  const [selected,      setSelected]      = useState(null);   // company object
+  const [editForm,      setEditForm]      = useState(null);   // null = view, obj = editing
+  const [adding,        setAdding]        = useState(false);
+  const [newForm,       setNewForm]       = useState({name:'',address:'',phone:'',website:'',notes:''});
+  const [linked,        setLinked]        = useState([]);     // contacts for selected company
+  const [linkSearch,    setLinkSearch]    = useState('');
+  const [allContacts,   setAllContacts]   = useState([]);
+  const [pickerOpen,    setPickerOpen]    = useState(false);
+  const [pickerSearch,  setPickerSearch]  = useState('');
+  const [saving,        setSaving]        = useState(false);
+  const [msg,           setMsg]           = useState('');
+
+  function loadCompanies(s) {
+    setLoading(true);
+    const q = s !== undefined ? s : search;
+    let url = '/api/companies';
+    if (q) url += `?search=${encodeURIComponent(q)}`;
+    apiFetch(url)
+      .then(data => { setCompanies(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }
+
+  function loadLinked(companyId) {
+    apiFetch(`/api/companies/${companyId}/contacts`)
+      .then(setLinked).catch(() => {});
+  }
+
+  function loadAllContacts() {
+    apiFetch('/api/contacts').then(setAllContacts).catch(() => {});
+  }
+
+  useEffect(() => { loadCompanies(); loadAllContacts(); }, []);
+
+  function selectCompany(co) {
+    setSelected(co);
+    setEditForm(null);
+    setLinkSearch('');
+    if (co) loadLinked(co.id);
+    else setLinked([]);
+  }
+
+  function flash(m) { setMsg(m); setTimeout(() => setMsg(''), 4000); }
+
+  // ── Save new company ──
+  function saveNew() {
+    if (!newForm.name.trim()) return;
+    setSaving(true);
+    apiFetch('/api/companies', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(newForm) })
+      .then(data => {
+        const created = { ...newForm, id: data.id, contact_count: 0 };
+        setCompanies(prev => [...prev, created].sort((a,b) => a.name.localeCompare(b.name)));
+        setAdding(false);
+        setNewForm({name:'',address:'',phone:'',website:'',notes:''});
+        selectCompany(created);
+        flash('✓ Company created');
+      })
+      .catch(() => flash('❌ Save failed'))
+      .finally(() => setSaving(false));
+  }
+
+  // ── Save edit ──
+  function saveEdit() {
+    if (!editForm.name.trim()) return;
+    setSaving(true);
+    apiFetch(`/api/companies/${selected.id}`, { method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(editForm) })
+      .then(() => {
+        const updated = { ...selected, ...editForm };
+        setSelected(updated);
+        setCompanies(prev => prev.map(c => c.id === selected.id ? updated : c));
+        setEditForm(null);
+        flash('✓ Saved');
+      })
+      .catch(() => flash('❌ Save failed'))
+      .finally(() => setSaving(false));
+  }
+
+  // ── Delete company ──
+  function deleteCompany(co) {
+    if (!confirm(`Delete "${co.name}"? This will also remove all linked contacts.`)) return;
+    apiFetch(`/api/companies/${co.id}`, { method:'DELETE' })
+      .then(() => {
+        setCompanies(prev => prev.filter(c => c.id !== co.id));
+        if (selected && selected.id === co.id) { setSelected(null); setLinked([]); }
+        flash('✓ Company deleted');
+      })
+      .catch(() => flash('❌ Delete failed'));
+  }
+
+  // ── Link contact ──
+  function linkContact(contact) {
+    apiFetch(`/api/companies/${selected.id}/contacts`, { method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ contact_id: contact.id, role: '' }) })
+      .then(() => {
+        loadLinked(selected.id);
+        setCompanies(prev => prev.map(c => c.id === selected.id
+          ? {...c, contact_count: (c.contact_count||0)+1} : c));
+        setPickerOpen(false);
+        setPickerSearch('');
+      })
+      .catch(e => flash('❌ Already linked or error'));
+  }
+
+  // ── Unlink contact ──
+  function unlinkContact(contact) {
+    apiFetch(`/api/companies/${selected.id}/contacts/${contact.id}`, { method:'DELETE' })
+      .then(() => {
+        setLinked(prev => prev.filter(c => c.id !== contact.id));
+        setCompanies(prev => prev.map(c => c.id === selected.id
+          ? {...c, contact_count: Math.max(0,(c.contact_count||1)-1)} : c));
+      })
+      .catch(() => flash('❌ Remove failed'));
+  }
+
+  // ── Update role inline ──
+  function updateRole(contact, role) {
+    apiFetch(`/api/companies/${selected.id}/contacts/${contact.id}`, { method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ contact_id: contact.id, role }) })
+      .then(() => setLinked(prev => prev.map(c => c.id === contact.id ? {...c, role} : c)))
+      .catch(() => {});
+  }
+
+  // Contacts not yet linked to this company
+  const linkedIds = new Set(linked.map(c => c.id));
+  const availableContacts = allContacts.filter(c =>
+    !linkedIds.has(c.id) &&
+    (!pickerSearch || (c.name||'').toLowerCase().includes(pickerSearch.toLowerCase())
+      || (c.company||'').toLowerCase().includes(pickerSearch.toLowerCase())
+      || (c.email||'').toLowerCase().includes(pickerSearch.toLowerCase()))
+  );
+
+  const filteredLinked = linked.filter(c =>
+    !linkSearch ||
+    (c.name||'').toLowerCase().includes(linkSearch.toLowerCase()) ||
+    (c.email||'').toLowerCase().includes(linkSearch.toLowerCase())
+  );
+
+  // Shared input style
+  const inp = {
+    width:'100%', padding:'6px 10px', border:'1px solid #d1d5db',
+    borderRadius:'6px', fontSize:'13px', boxSizing:'border-box'
+  };
+
+  function fieldRow(label, key, form, setForm, type='text') {
+    return React.createElement('div', {key, style:{marginBottom:'10px'}},
+      React.createElement('label', {style:{display:'block', fontSize:'11px', fontWeight:600, color:'#6b7280', marginBottom:'3px', textTransform:'uppercase', letterSpacing:'0.5px'}}, label),
+      type === 'textarea'
+        ? React.createElement('textarea', {
+            value: form[key]||'', rows:3,
+            onChange: e => setForm(f=>({...f,[key]:e.target.value})),
+            style:{...inp, resize:'vertical'}
+          })
+        : React.createElement('input', {
+            type, value: form[key]||'',
+            onChange: e => setForm(f=>({...f,[key]:e.target.value})),
+            style: inp
+          })
+    );
+  }
+
+  return React.createElement('div', {style:{display:'flex', gap:'0', minHeight:'70vh', background:'#f8fafc', borderRadius:'12px', overflow:'hidden', border:'1px solid #e2e8f0', boxShadow:'0 1px 4px rgba(0,0,0,0.07)'}},
+
+    // ── LEFT: Company list ────────────────────────────────────────────────────
+    React.createElement('div', {style:{width:'280px', flexShrink:0, borderRight:'1px solid #e2e8f0', background:'#fff', display:'flex', flexDirection:'column'}},
+
+      // Header
+      React.createElement('div', {style:{padding:'14px 14px 10px', borderBottom:'1px solid #f0f4f8'}},
+        React.createElement('div', {style:{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px'}},
+          React.createElement('h2', {style:{fontSize:'15px', fontWeight:700, color:'#1F4E79', margin:0}}, '🏢 Companies'),
+          React.createElement('button', {
+            onClick: () => { setAdding(true); setSelected(null); setEditForm(null); },
+            style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
+              padding:'4px 10px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+          }, '+ Add')
+        ),
+        React.createElement('input', {
+          placeholder:'Search companies…', value:search,
+          onChange: e => { setSearch(e.target.value); loadCompanies(e.target.value); },
+          style:{...inp, fontSize:'12px'}
+        })
+      ),
+
+      // List
+      React.createElement('div', {style:{flex:1, overflowY:'auto'}},
+        loading
+          ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#9ca3af', fontSize:'13px'}}, 'Loading…')
+          : companies.length === 0
+            ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#9ca3af', fontSize:'13px'}}, 'No companies yet')
+            : companies.map(co =>
+                React.createElement('div', {
+                  key: co.id,
+                  onClick: () => selectCompany(co),
+                  style:{
+                    padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f0f4f8',
+                    background: selected && selected.id===co.id ? '#EFF6FF' : '#fff',
+                    borderLeft: selected && selected.id===co.id ? '3px solid #1F4E79' : '3px solid transparent',
+                  }
+                },
+                  React.createElement('div', {style:{fontWeight:600, fontSize:'13px', color:'#1e293b'}}, co.name),
+                  React.createElement('div', {style:{fontSize:'11px', color:'#64748b', marginTop:'2px'}},
+                    [co.phone, `${co.contact_count||0} contact${co.contact_count===1?'':'s'}`].filter(Boolean).join(' · ')
+                  )
+                )
+              )
+      )
+    ),
+
+    // ── RIGHT: Detail panel ───────────────────────────────────────────────────
+    React.createElement('div', {style:{flex:1, display:'flex', flexDirection:'column', overflowY:'auto', padding:'20px'}},
+
+      // Flash message
+      msg && React.createElement('div', {style:{
+        background: msg.startsWith('✓') ? '#dcfce7' : '#fee2e2',
+        color: msg.startsWith('✓') ? '#166534' : '#991b1b',
+        padding:'8px 14px', borderRadius:'8px', fontSize:'13px', marginBottom:'14px'
+      }}, msg),
+
+      // ── Add Company form ──
+      adding && React.createElement('div', {style:{background:'#fff', borderRadius:'10px', padding:'18px', border:'1px solid #e2e8f0', marginBottom:'18px', boxShadow:'0 1px 3px rgba(0,0,0,0.06)'}},
+        React.createElement('h3', {style:{fontSize:'14px', fontWeight:700, color:'#1F4E79', marginBottom:'14px'}}, '➕ New Company'),
+        fieldRow('Company Name *', 'name', newForm, setNewForm),
+        fieldRow('Address', 'address', newForm, setNewForm),
+        fieldRow('Phone', 'phone', newForm, setNewForm),
+        fieldRow('Website', 'website', newForm, setNewForm, 'url'),
+        fieldRow('Notes', 'notes', newForm, setNewForm, 'textarea'),
+        React.createElement('div', {style:{display:'flex', gap:'8px', marginTop:'6px'}},
+          React.createElement('button', {
+            onClick: saveNew, disabled: saving || !newForm.name.trim(),
+            style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
+              padding:'7px 18px', fontSize:'13px', fontWeight:600, cursor:'pointer', opacity: saving?0.6:1}
+          }, saving ? 'Saving…' : 'Create Company'),
+          React.createElement('button', {
+            onClick: () => setAdding(false),
+            style:{background:'#f1f5f9', color:'#475569', border:'none', borderRadius:'6px',
+              padding:'7px 14px', fontSize:'13px', cursor:'pointer'}
+          }, 'Cancel')
+        )
+      ),
+
+      // ── No selection placeholder ──
+      !selected && !adding && React.createElement('div', {style:{
+        flex:1, display:'flex', alignItems:'center', justifyContent:'center',
+        color:'#94a3b8', fontSize:'14px', flexDirection:'column', gap:'8px', minHeight:'200px'
+      }},
+        React.createElement('div', {style:{fontSize:'40px'}}, '🏢'),
+        React.createElement('div', null, 'Select a company or add a new one')
+      ),
+
+      // ── Selected company detail ──
+      selected && React.createElement('div', {style:{display:'flex', flexDirection:'column', gap:'16px'}},
+
+        // Company header card
+        React.createElement('div', {style:{background:'#fff', borderRadius:'10px', padding:'18px', border:'1px solid #e2e8f0', boxShadow:'0 1px 3px rgba(0,0,0,0.06)'}},
+          editForm
+            // ── Edit mode ──
+            ? React.createElement('div', null,
+                React.createElement('h3', {style:{fontSize:'14px', fontWeight:700, color:'#1F4E79', marginBottom:'14px'}}, '✏️ Edit Company'),
+                fieldRow('Company Name *', 'name', editForm, setEditForm),
+                fieldRow('Address', 'address', editForm, setEditForm),
+                fieldRow('Phone', 'phone', editForm, setEditForm),
+                fieldRow('Website', 'website', editForm, setEditForm, 'url'),
+                fieldRow('Notes', 'notes', editForm, setEditForm, 'textarea'),
+                React.createElement('div', {style:{display:'flex', gap:'8px', marginTop:'6px'}},
+                  React.createElement('button', {
+                    onClick: saveEdit, disabled: saving || !editForm.name.trim(),
+                    style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
+                      padding:'7px 18px', fontSize:'13px', fontWeight:600, cursor:'pointer', opacity:saving?0.6:1}
+                  }, saving ? 'Saving…' : 'Save'),
+                  React.createElement('button', {
+                    onClick: () => setEditForm(null),
+                    style:{background:'#f1f5f9', color:'#475569', border:'none', borderRadius:'6px',
+                      padding:'7px 14px', fontSize:'13px', cursor:'pointer'}
+                  }, 'Cancel')
+                )
+              )
+            // ── View mode ──
+            : React.createElement('div', null,
+                React.createElement('div', {style:{display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'12px'}},
+                  React.createElement('h3', {style:{fontSize:'18px', fontWeight:700, color:'#1e293b', margin:0}}, selected.name),
+                  React.createElement('div', {style:{display:'flex', gap:'6px'}},
+                    React.createElement('button', {
+                      onClick: () => setEditForm({name:selected.name||'', address:selected.address||'', phone:selected.phone||'', website:selected.website||'', notes:selected.notes||''}),
+                      style:{background:'#f1f5f9', color:'#475569', border:'none', borderRadius:'6px',
+                        padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+                    }, '✏️ Edit'),
+                    React.createElement('button', {
+                      onClick: () => deleteCompany(selected),
+                      style:{background:'#fee2e2', color:'#dc2626', border:'none', borderRadius:'6px',
+                        padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+                    }, '🗑 Delete')
+                  )
+                ),
+                React.createElement('div', {style:{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px 20px'}},
+                  selected.phone && React.createElement('div', null,
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Phone'),
+                    React.createElement('div', {style:{fontSize:'13px', color:'#334155'}}, selected.phone)
+                  ),
+                  selected.website && React.createElement('div', null,
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Website'),
+                    React.createElement('a', {href:selected.website, target:'_blank', rel:'noopener noreferrer',
+                      style:{fontSize:'13px', color:'#2563eb', textDecoration:'none'}}, selected.website)
+                  ),
+                  selected.address && React.createElement('div', {style:{gridColumn:'1/-1'}},
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Address'),
+                    React.createElement('div', {style:{fontSize:'13px', color:'#334155', whiteSpace:'pre-line'}}, selected.address)
+                  ),
+                  selected.notes && React.createElement('div', {style:{gridColumn:'1/-1'}},
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Notes'),
+                    React.createElement('div', {style:{fontSize:'13px', color:'#334155', whiteSpace:'pre-line'}}, selected.notes)
+                  )
+                )
+              )
+        ),
+
+        // ── Linked Contacts section ──
+        React.createElement('div', {style:{background:'#fff', borderRadius:'10px', border:'1px solid #e2e8f0', boxShadow:'0 1px 3px rgba(0,0,0,0.06)', overflow:'hidden'}},
+
+          // Section header
+          React.createElement('div', {style:{padding:'14px 16px', borderBottom:'1px solid #f0f4f8', display:'flex', alignItems:'center', justifyContent:'space-between', background:'#f8fafc'}},
+            React.createElement('div', {style:{fontWeight:700, fontSize:'14px', color:'#1F4E79'}},
+              `👥 Linked Contacts (${linked.length})`
+            ),
+            React.createElement('button', {
+              onClick: () => { setPickerOpen(true); setPickerSearch(''); },
+              style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
+                padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+            }, '+ Link Contact')
+          ),
+
+          // Search within linked contacts
+          linked.length > 4 && React.createElement('div', {style:{padding:'8px 16px', borderBottom:'1px solid #f0f4f8'}},
+            React.createElement('input', {
+              placeholder:'Filter linked contacts…', value:linkSearch,
+              onChange: e => setLinkSearch(e.target.value),
+              style:{...inp, fontSize:'12px'}
+            })
+          ),
+
+          // Linked contact rows
+          filteredLinked.length === 0
+            ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#94a3b8', fontSize:'13px'}},
+                linked.length === 0 ? 'No contacts linked yet' : 'No matches'
+              )
+            : React.createElement('div', null,
+                filteredLinked.map(c =>
+                  React.createElement('div', {key:c.id, style:{
+                    padding:'12px 16px', borderBottom:'1px solid #f8fafc',
+                    display:'flex', alignItems:'flex-start', gap:'12px'
+                  }},
+                    React.createElement('div', {style:{
+                      width:'36px', height:'36px', borderRadius:'50%', flexShrink:0,
+                      background:'#EFF6FF', display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize:'14px', fontWeight:700, color:'#1F4E79'
+                    }}, (c.name||c.email||'?').charAt(0).toUpperCase()),
+                    React.createElement('div', {style:{flex:1, minWidth:0}},
+                      React.createElement('div', {style:{fontWeight:600, fontSize:'13px', color:'#1e293b'}}, c.name || '(no name)'),
+                      React.createElement('div', {style:{fontSize:'12px', color:'#64748b'}}, [c.email, c.phone].filter(Boolean).join(' · ')),
+                      React.createElement('div', {style:{marginTop:'5px', display:'flex', alignItems:'center', gap:'6px'}},
+                        React.createElement('span', {style:{fontSize:'11px', color:'#94a3b8', fontWeight:500}}, 'Role:'),
+                        React.createElement('input', {
+                          value: c.role||'',
+                          placeholder:'e.g. Buyer, Decision Maker…',
+                          onChange: e => setLinked(prev => prev.map(x => x.id===c.id ? {...x, role:e.target.value} : x)),
+                          onBlur: e => updateRole(c, e.target.value),
+                          style:{border:'none', borderBottom:'1px dashed #cbd5e1', background:'transparent',
+                            fontSize:'12px', color:'#475569', padding:'1px 4px', outline:'none', width:'200px'}
+                        })
+                      )
+                    ),
+                    React.createElement('button', {
+                      onClick: () => unlinkContact(c),
+                      title: 'Remove link',
+                      style:{background:'none', border:'none', color:'#94a3b8', cursor:'pointer',
+                        fontSize:'16px', padding:'4px', flexShrink:0, lineHeight:1}
+                    }, '×')
+                  )
+                )
+              )
+        )
+      ),
+
+      // ── Contact Picker Modal ──
+      pickerOpen && React.createElement('div', {
+        style:{position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:1000,
+          display:'flex', alignItems:'center', justifyContent:'center'},
+        onClick: e => { if (e.target === e.currentTarget) setPickerOpen(false); }
+      },
+        React.createElement('div', {style:{
+          background:'#fff', borderRadius:'12px', width:'480px', maxWidth:'95vw',
+          maxHeight:'75vh', display:'flex', flexDirection:'column',
+          boxShadow:'0 20px 60px rgba(0,0,0,0.3)', overflow:'hidden'
+        }},
+          // Modal header
+          React.createElement('div', {style:{padding:'16px 20px', borderBottom:'1px solid #e2e8f0', display:'flex', alignItems:'center', justifyContent:'space-between'}},
+            React.createElement('h3', {style:{fontSize:'15px', fontWeight:700, color:'#1e293b', margin:0}}, 'Link a Contact'),
+            React.createElement('button', {onClick:()=>setPickerOpen(false),
+              style:{background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#94a3b8', lineHeight:1}}, '×')
+          ),
+          // Search
+          React.createElement('div', {style:{padding:'12px 20px', borderBottom:'1px solid #f0f4f8'}},
+            React.createElement('input', {
+              autoFocus:true, placeholder:'Search by name, company, or email…',
+              value:pickerSearch, onChange: e => setPickerSearch(e.target.value),
+              style:{...inp}
+            })
+          ),
+          // Results
+          React.createElement('div', {style:{flex:1, overflowY:'auto'}},
+            availableContacts.length === 0
+              ? React.createElement('div', {style:{padding:'24px', textAlign:'center', color:'#94a3b8', fontSize:'13px'}},
+                  allContacts.length === linked.length ? 'All contacts already linked' : 'No matches'
+                )
+              : availableContacts.map(c =>
+                  React.createElement('div', {
+                    key:c.id,
+                    onClick: () => linkContact(c),
+                    style:{padding:'10px 20px', cursor:'pointer', borderBottom:'1px solid #f8fafc',
+                      display:'flex', alignItems:'center', gap:'12px'}
+                  },
+                    React.createElement('div', {style:{
+                      width:'32px', height:'32px', borderRadius:'50%', flexShrink:0,
+                      background:'#EFF6FF', display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize:'13px', fontWeight:700, color:'#1F4E79'
+                    }}, (c.name||c.email||'?').charAt(0).toUpperCase()),
+                    React.createElement('div', null,
+                      React.createElement('div', {style:{fontWeight:600, fontSize:'13px', color:'#1e293b'}}, c.name || '(no name)'),
+                      React.createElement('div', {style:{fontSize:'12px', color:'#64748b'}},
+                        [c.company, c.email].filter(Boolean).join(' · '))
+                    )
+                  )
+                )
+          )
+        )
+      )
+    )
+  );
+}
+
 // ── App shell ─────────────────────────────────────────────────────────────────
 function App() {
   const [splashVisible, setSplashVisible] = useState(true);
@@ -1993,14 +2439,23 @@ function App() {
             React.createElement('div', {className:'text-base sm:text-lg font-bold tracking-tight leading-none'}, 'SPECFORM SalesPartner')
           )
         ),
-        // Customer Directory button — far right of blue header
-        React.createElement('button', {
-          onClick: () => setTab('directory'),
-          className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
-          style: tab === 'directory'
-            ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
-            : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
-        }, '👥 Customer Directory')
+        // Header buttons — far right of blue header
+        React.createElement('div', {style:{display:'flex', gap:'8px', alignItems:'center'}},
+          React.createElement('button', {
+            onClick: () => setTab('directory'),
+            className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+            style: tab === 'directory'
+              ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
+              : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
+          }, '👥 Customer Directory'),
+          React.createElement('button', {
+            onClick: () => setTab('companies'),
+            className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+            style: tab === 'companies'
+              ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
+              : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
+          }, '🏢 Company Accounts')
+        )
       )
     ),
 
@@ -2046,6 +2501,7 @@ function App() {
       : tab === 'glassworks-dashboard'? React.createElement(Dashboard, {key:'gw-dash',      cfg: GLASSWORKS_CFG})
       : tab === 'sales'               ? React.createElement(SalesTab)
       : tab === 'directory'           ? React.createElement(CustomerDirectory, {key:'dir'})
+      : tab === 'companies'           ? React.createElement(CompanyAccounts, {key:'companies'})
       : tab === 'hydrotech'           ? React.createElement(QuoteList, {
           key: 'hydrotech',
           refresh,
