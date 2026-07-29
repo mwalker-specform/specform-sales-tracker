@@ -1995,6 +1995,25 @@ def init_contacts_db():
                 con.execute(f"ALTER TABLE contacts ADD COLUMN {col} {defn}")
             except Exception:
                 pass  # Column already exists
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS companies (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            address     TEXT,
+            phone       TEXT,
+            website     TEXT,
+            notes       TEXT,
+            created_at  TEXT DEFAULT (datetime('now')),
+            updated_at  TEXT DEFAULT (datetime('now'))
+        )""")
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS company_contacts (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id  INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            contact_id  INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            role        TEXT,
+            UNIQUE(company_id, contact_id)
+        )""")
 
 class ContactIn(BaseModel):
     name:          Optional[str] = None
@@ -2350,6 +2369,108 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
         "total_updated": total_updated,
         "total_skipped": total_skipped,
     }
+
+# ── Company Accounts ──────────────────────────────────────────────────────────
+class CompanyIn(BaseModel):
+    name:    str
+    address: Optional[str] = None
+    phone:   Optional[str] = None
+    website: Optional[str] = None
+    notes:   Optional[str] = None
+
+@app.get("/api/companies")
+def list_companies(search: Optional[str] = Query(None)):
+    with get_db() as con:
+        sql = """
+            SELECT c.*, COUNT(cc.contact_id) as contact_count
+            FROM companies c
+            LEFT JOIN company_contacts cc ON cc.company_id = c.id
+            WHERE 1=1
+        """
+        params = []
+        if search:
+            sql += " AND (c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ?)"
+            s = f"%{search}%"
+            params += [s, s, s]
+        sql += " GROUP BY c.id ORDER BY c.name COLLATE NOCASE"
+        return [dict(r) for r in con.execute(sql, params).fetchall()]
+
+@app.post("/api/companies", status_code=201)
+def create_company(c: CompanyIn):
+    with get_db() as con:
+        cur = con.execute(
+            "INSERT INTO companies (name,address,phone,website,notes) VALUES (?,?,?,?,?)",
+            (c.name, c.address, c.phone, c.website, c.notes)
+        )
+        return {"id": cur.lastrowid}
+
+@app.put("/api/companies/{company_id}")
+def update_company(company_id: int, c: CompanyIn):
+    with get_db() as con:
+        existing = con.execute("SELECT id FROM companies WHERE id=?", (company_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "Company not found")
+        con.execute("""
+            UPDATE companies SET name=?,address=?,phone=?,website=?,notes=?,updated_at=datetime('now')
+            WHERE id=?
+        """, (c.name, c.address, c.phone, c.website, c.notes, company_id))
+        return {"ok": True}
+
+@app.delete("/api/companies/{company_id}")
+def delete_company(company_id: int):
+    with get_db() as con:
+        con.execute("DELETE FROM company_contacts WHERE company_id=?", (company_id,))
+        con.execute("DELETE FROM companies WHERE id=?", (company_id,))
+        return {"ok": True}
+
+@app.get("/api/companies/{company_id}/contacts")
+def list_company_contacts(company_id: int):
+    with get_db() as con:
+        rows = con.execute("""
+            SELECT ct.*, cc.role, cc.id as link_id
+            FROM contacts ct
+            JOIN company_contacts cc ON cc.contact_id = ct.id
+            WHERE cc.company_id = ?
+            ORDER BY COALESCE(NULLIF(ct.name,''),'zzz')
+        """, (company_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+class CompanyContactIn(BaseModel):
+    contact_id: int
+    role:       Optional[str] = None
+
+@app.post("/api/companies/{company_id}/contacts", status_code=201)
+def add_company_contact(company_id: int, body: CompanyContactIn):
+    with get_db() as con:
+        existing = con.execute("SELECT id FROM companies WHERE id=?", (company_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "Company not found")
+        try:
+            con.execute(
+                "INSERT INTO company_contacts (company_id,contact_id,role) VALUES (?,?,?)",
+                (company_id, body.contact_id, body.role)
+            )
+        except Exception:
+            raise HTTPException(409, "Contact already linked to this company")
+        return {"ok": True}
+
+@app.delete("/api/companies/{company_id}/contacts/{contact_id}")
+def remove_company_contact(company_id: int, contact_id: int):
+    with get_db() as con:
+        con.execute(
+            "DELETE FROM company_contacts WHERE company_id=? AND contact_id=?",
+            (company_id, contact_id)
+        )
+        return {"ok": True}
+
+@app.put("/api/companies/{company_id}/contacts/{contact_id}")
+def update_company_contact_role(company_id: int, contact_id: int, body: CompanyContactIn):
+    with get_db() as con:
+        con.execute(
+            "UPDATE company_contacts SET role=? WHERE company_id=? AND contact_id=?",
+            (body.role, company_id, contact_id)
+        )
+        return {"ok": True}
 
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
