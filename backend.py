@@ -1997,21 +1997,23 @@ def init_contacts_db():
                 pass  # Column already exists
         con.execute("""
         CREATE TABLE IF NOT EXISTS companies (
-            id                       INTEGER PRIMARY KEY AUTOINCREMENT,
-            name                     TEXT NOT NULL,
-            address                  TEXT,
-            phone                    TEXT,
-            website                  TEXT,
-            notes                    TEXT,
-            strong_market_partner    INTEGER DEFAULT 0,
+            id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                      TEXT NOT NULL,
+            address                   TEXT,
+            phone                     TEXT,
+            website                   TEXT,
+            region                    TEXT,
+            notes                     TEXT,
+            strong_market_partner     INTEGER DEFAULT 0,
             large_account_opportunity INTEGER DEFAULT 0,
-            created_at               TEXT DEFAULT (datetime('now')),
-            updated_at               TEXT DEFAULT (datetime('now'))
+            created_at                TEXT DEFAULT (datetime('now')),
+            updated_at                TEXT DEFAULT (datetime('now'))
         )""")
         # Migrations for companies columns added after initial deploy
         for col, defn in [
             ("strong_market_partner",     "INTEGER DEFAULT 0"),
             ("large_account_opportunity", "INTEGER DEFAULT 0"),
+            ("region",                    "TEXT"),
         ]:
             try:
                 con.execute(f"ALTER TABLE companies ADD COLUMN {col} {defn}")
@@ -2383,16 +2385,17 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
 
 # ── Company Accounts ──────────────────────────────────────────────────────────
 class CompanyIn(BaseModel):
-    name:                     str
-    address:                  Optional[str] = None
-    phone:                    Optional[str] = None
-    website:                  Optional[str] = None
-    notes:                    Optional[str] = None
-    strong_market_partner:    Optional[int] = 0
+    name:                      str
+    address:                   Optional[str] = None
+    phone:                     Optional[str] = None
+    website:                   Optional[str] = None
+    region:                    Optional[str] = None
+    notes:                     Optional[str] = None
+    strong_market_partner:     Optional[int] = 0
     large_account_opportunity: Optional[int] = 0
 
 @app.get("/api/companies")
-def list_companies(search: Optional[str] = Query(None)):
+def list_companies(search: Optional[str] = Query(None), region: Optional[str] = Query(None)):
     with get_db() as con:
         sql = """
             SELECT c.*, COUNT(cc.contact_id) as contact_count
@@ -2405,6 +2408,9 @@ def list_companies(search: Optional[str] = Query(None)):
             sql += " AND (c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ?)"
             s = f"%{search}%"
             params += [s, s, s]
+        if region and region != 'All':
+            sql += " AND c.region = ?"
+            params.append(region)
         sql += " GROUP BY c.id ORDER BY c.name COLLATE NOCASE"
         return [dict(r) for r in con.execute(sql, params).fetchall()]
 
@@ -2412,8 +2418,8 @@ def list_companies(search: Optional[str] = Query(None)):
 def create_company(c: CompanyIn):
     with get_db() as con:
         cur = con.execute(
-            "INSERT INTO companies (name,address,phone,website,notes,strong_market_partner,large_account_opportunity) VALUES (?,?,?,?,?,?,?)",
-            (c.name, c.address, c.phone, c.website, c.notes, c.strong_market_partner or 0, c.large_account_opportunity or 0)
+            "INSERT INTO companies (name,address,phone,website,region,notes,strong_market_partner,large_account_opportunity) VALUES (?,?,?,?,?,?,?,?)",
+            (c.name, c.address, c.phone, c.website, c.region, c.notes, c.strong_market_partner or 0, c.large_account_opportunity or 0)
         )
         return {"id": cur.lastrowid}
 
@@ -2424,10 +2430,10 @@ def update_company(company_id: int, c: CompanyIn):
         if not existing:
             raise HTTPException(404, "Company not found")
         con.execute("""
-            UPDATE companies SET name=?,address=?,phone=?,website=?,notes=?,
+            UPDATE companies SET name=?,address=?,phone=?,website=?,region=?,notes=?,
                 strong_market_partner=?,large_account_opportunity=?,updated_at=datetime('now')
             WHERE id=?
-        """, (c.name, c.address, c.phone, c.website, c.notes,
+        """, (c.name, c.address, c.phone, c.website, c.region, c.notes,
               c.strong_market_partner or 0, c.large_account_opportunity or 0, company_id))
         return {"ok": True}
 
