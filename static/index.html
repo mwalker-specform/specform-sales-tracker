@@ -370,6 +370,8 @@ function Dashboard({ cfg = RMAX_CFG }) {
   })() : locationChartData.map(r => ({region: r.name, total: r.total, won: r.won, verbal: r.verbal}));
 
   return React.createElement('div', {className:'space-y-6'},
+    // Dashboard title
+    React.createElement('h2', {className:'text-xl font-bold text-gray-800'}, cfg.label + ' Dashboard'),
     // KPI row with month selector
     React.createElement('div', {className:'space-y-3'},
       React.createElement('div', {className:'flex items-center justify-between'},
