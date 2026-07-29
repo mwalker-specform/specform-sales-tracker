@@ -94,7 +94,8 @@ def init_db():
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
                                  ('region',            'TEXT'),
-                                 ('deleted',           'INTEGER DEFAULT 0')]:
+                                 ('deleted',           'INTEGER DEFAULT 0'),
+                                 ('company_id',        'INTEGER')]:
             try:
                 con.execute(f"ALTER TABLE quotes ADD COLUMN {col} {definition}")
             except Exception:
@@ -123,6 +124,7 @@ class QuoteIn(BaseModel):
     region:             Optional[str] = None
     add_to_salesforce:  Optional[int] = 0
     completed:          Optional[int] = 0
+    company_id:         Optional[int] = None
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="RMAX Quote Tracker")
@@ -202,13 +204,13 @@ def create_quote(q: QuoteIn):
         cur = con.execute("""
         INSERT INTO quotes (status,date_received,date_quoted,sent_to,subject,job_name,
             customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
-            region,add_to_salesforce,completed)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            region,add_to_salesforce,completed,company_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed))
+              q.region,q.add_to_salesforce,q.completed,q.company_id))
         return {"id": cur.lastrowid}
 
 @app.put("/api/quotes/{quote_id}")
@@ -221,13 +223,13 @@ def update_quote(quote_id: int, q: QuoteIn):
         UPDATE quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
             job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
             close_date=?,est_freight=?,lead_time=?,notes=?,
-            region=?,add_to_salesforce=?,completed=?,updated_at=datetime('now')
+            region=?,add_to_salesforce=?,completed=?,company_id=?,updated_at=datetime('now')
         WHERE id=?
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed,quote_id))
+              q.region,q.add_to_salesforce,q.completed,q.company_id,quote_id))
         return {"ok": True}
 
 @app.delete("/api/quotes/{quote_id}")
@@ -1102,7 +1104,8 @@ def init_hydrotech_db():
                                  ('completed',         'INTEGER DEFAULT 0'),
                                  ('region',            'TEXT'),
                                  ('deleted',           'INTEGER DEFAULT 0'),
-                                 ('pdf_filename',      'TEXT')]:
+                                 ('pdf_filename',      'TEXT'),
+                                 ('company_id',        'INTEGER')]:
             try:
                 con.execute(f"ALTER TABLE hydrotech_quotes ADD COLUMN {col} {definition}")
             except Exception:
@@ -1186,12 +1189,12 @@ def create_hydrotech_quote(q: QuoteIn):
         cur = con.execute("""
         INSERT INTO hydrotech_quotes (status,date_received,date_quoted,sent_to,subject,job_name,
             customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
-            region,add_to_salesforce,completed)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            region,add_to_salesforce,completed,company_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (q.status,q.date_received,q.date_quoted,q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               q.close_date,q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed))
+              q.region,q.add_to_salesforce,q.completed,q.company_id))
         return {"id": cur.lastrowid}
 
 @app.put("/api/hydrotech-quotes/{quote_id}")
@@ -1204,12 +1207,12 @@ def update_hydrotech_quote(quote_id: int, q: QuoteIn):
         UPDATE hydrotech_quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
             job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
             close_date=?,est_freight=?,lead_time=?,notes=?,
-            region=?,add_to_salesforce=?,completed=?,updated_at=datetime('now')
+            region=?,add_to_salesforce=?,completed=?,company_id=?,updated_at=datetime('now')
         WHERE id=?
         """, (q.status,q.date_received,q.date_quoted,q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               q.close_date,q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed,quote_id))
+              q.region,q.add_to_salesforce,q.completed,q.company_id,quote_id))
         return {"ok": True}
 
 @app.delete("/api/hydrotech-quotes/{quote_id}")
@@ -1511,7 +1514,8 @@ def init_glassworks_db():
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
                                  ('region',            'TEXT'),
-                                 ('deleted',           'INTEGER DEFAULT 0')]:
+                                 ('deleted',           'INTEGER DEFAULT 0'),
+                                 ('company_id',        'INTEGER')]:
             try:
                 con.execute(f"ALTER TABLE glassworks_quotes ADD COLUMN {col} {definition}")
             except Exception:
@@ -1554,13 +1558,13 @@ def create_glassworks_quote(q: QuoteIn):
         cur = con.execute("""
         INSERT INTO glassworks_quotes (status,date_received,date_quoted,sent_to,subject,job_name,
             customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
-            region,add_to_salesforce,completed)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            region,add_to_salesforce,completed,company_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed))
+              q.region,q.add_to_salesforce,q.completed,q.company_id))
         return {"id": cur.lastrowid}
 
 @app.put("/api/glassworks-quotes/{quote_id}")
@@ -1573,13 +1577,13 @@ def update_glassworks_quote(quote_id: int, q: QuoteIn):
         UPDATE glassworks_quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
             job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
             close_date=?,est_freight=?,lead_time=?,notes=?,
-            region=?,add_to_salesforce=?,completed=?,updated_at=datetime('now')
+            region=?,add_to_salesforce=?,completed=?,company_id=?,updated_at=datetime('now')
         WHERE id=?
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed,quote_id))
+              q.region,q.add_to_salesforce,q.completed,q.company_id,quote_id))
         return {"ok": True}
 
 @app.delete("/api/glassworks-quotes/{quote_id}")
