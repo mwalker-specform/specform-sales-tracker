@@ -2203,7 +2203,7 @@ function CompanyAccounts() {
   return React.createElement('div', {style:{display:'flex', gap:'0', minHeight:'70vh', background:'#f8fafc', borderRadius:'12px', overflow:'hidden', border:'1px solid #e2e8f0', boxShadow:'0 1px 4px rgba(0,0,0,0.07)'}},
 
     // ── LEFT: Company list ────────────────────────────────────────────────────
-    React.createElement('div', {style:{width:'280px', flexShrink:0, borderRight:'1px solid #e2e8f0', background:'#fff', display:'flex', flexDirection:'column'}},
+    React.createElement('div', {style:{width:'280px', flexShrink:0, borderRight:'1px solid #e2e8f0', background:'#fff', display:'flex', flexDirection:'column', height:'75vh', position:'sticky', top:0}},
 
       // Header
       React.createElement('div', {style:{padding:'14px 14px 10px', borderBottom:'1px solid #f0f4f8'}},
@@ -2242,7 +2242,7 @@ function CompanyAccounts() {
       ),
 
       // List
-      React.createElement('div', {style:{flex:1, overflowY:'auto'}},
+      React.createElement('div', {style:{flex:1, overflowY:'auto', minHeight:0}},
         loading
           ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#9ca3af', fontSize:'13px'}}, 'Loading…')
           : companies.length === 0
