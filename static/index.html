@@ -1926,7 +1926,8 @@ function CompanyAccounts() {
   const [selected,      setSelected]      = useState(null);   // company object
   const [editForm,      setEditForm]      = useState(null);   // null = view, obj = editing
   const [adding,        setAdding]        = useState(false);
-  const [newForm,       setNewForm]       = useState({name:'',address:'',phone:'',website:'',notes:'',strong_market_partner:0,large_account_opportunity:0});
+  const [newForm,       setNewForm]       = useState({name:'',address:'',phone:'',website:'',region:'',notes:'',strong_market_partner:0,large_account_opportunity:0});
+  const COMPANY_REGIONS = ['','Central Texas','Southeast Texas','The Valley'];
   const [linked,        setLinked]        = useState([]);     // contacts for selected company
   const [linkSearch,    setLinkSearch]    = useState('');
   const [allContacts,   setAllContacts]   = useState([]);
@@ -1934,12 +1935,16 @@ function CompanyAccounts() {
   const [pickerSearch,  setPickerSearch]  = useState('');
   const [saving,        setSaving]        = useState(false);
   const [msg,           setMsg]           = useState('');
+  const [regionFilter,  setRegionFilter]  = useState('All');
 
-  function loadCompanies(s) {
+  function loadCompanies(s, r) {
     setLoading(true);
-    const q = s !== undefined ? s : search;
-    let url = '/api/companies';
-    if (q) url += `?search=${encodeURIComponent(q)}`;
+    const q  = s !== undefined ? s : search;
+    const rf = r !== undefined ? r : regionFilter;
+    const params = [];
+    if (q)            params.push(`search=${encodeURIComponent(q)}`);
+    if (rf && rf !== 'All') params.push(`region=${encodeURIComponent(rf)}`);
+    const url = '/api/companies' + (params.length ? '?' + params.join('&') : '');
     apiFetch(url)
       .then(data => { setCompanies(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -1976,7 +1981,7 @@ function CompanyAccounts() {
         const created = { ...newForm, id: data.id, contact_count: 0 };
         setCompanies(prev => [...prev, created].sort((a,b) => a.name.localeCompare(b.name)));
         setAdding(false);
-        setNewForm({name:'',address:'',phone:'',website:'',notes:'',strong_market_partner:0,large_account_opportunity:0});
+        setNewForm({name:'',address:'',phone:'',website:'',region:'',notes:'',strong_market_partner:0,large_account_opportunity:0});
         selectCompany(created);
         flash('✓ Company created');
       })
@@ -2086,6 +2091,17 @@ function CompanyAccounts() {
     );
   }
 
+  function selectRow(label, key, form, setForm, options) {
+    return React.createElement('div', {key, style:{marginBottom:'10px'}},
+      React.createElement('label', {style:{display:'block', fontSize:'11px', fontWeight:600, color:'#6b7280', marginBottom:'3px', textTransform:'uppercase', letterSpacing:'0.5px'}}, label),
+      React.createElement('select', {
+        value: form[key]||'',
+        onChange: e => setForm(f=>({...f,[key]:e.target.value})),
+        style:{...inp, background:'#fff'}
+      }, options.map(o => React.createElement('option', {key:o, value:o}, o||'— None —')))
+    );
+  }
+
   function checkboxRow(label, key, form, setForm, color='#1F4E79') {
     const checked = !!(form[key]);
     return React.createElement('label', {key, style:{display:'flex', alignItems:'center', gap:'10px', cursor:'pointer', padding:'7px 10px', borderRadius:'8px', border:`1px solid ${checked ? color : '#e2e8f0'}`, background: checked ? `${color}12` : '#fafafa', marginBottom:'8px', userSelect:'none'}},
@@ -2115,9 +2131,19 @@ function CompanyAccounts() {
         ),
         React.createElement('input', {
           placeholder:'Search companies…', value:search,
-          onChange: e => { setSearch(e.target.value); loadCompanies(e.target.value); },
-          style:{...inp, fontSize:'12px'}
-        })
+          onChange: e => { setSearch(e.target.value); loadCompanies(e.target.value, regionFilter); },
+          style:{...inp, fontSize:'12px', marginBottom:'6px'}
+        }),
+        React.createElement('select', {
+          value: regionFilter,
+          onChange: e => { setRegionFilter(e.target.value); loadCompanies(search, e.target.value); },
+          style:{...inp, fontSize:'12px', background:'#fff'}
+        },
+          React.createElement('option', {value:'All'}, 'All Regions'),
+          ['Central Texas','Southeast Texas','The Valley'].map(r =>
+            React.createElement('option', {key:r, value:r}, r)
+          )
+        )
       ),
 
       // List
@@ -2142,7 +2168,7 @@ function CompanyAccounts() {
                     co.large_account_opportunity ? React.createElement('span', {title:'Large Account Opportunity', style:{fontSize:'12px'}}, '🎯') : null
                   ),
                   React.createElement('div', {style:{fontSize:'11px', color:'#64748b', marginTop:'2px'}},
-                    [co.phone, `${co.contact_count||0} contact${co.contact_count===1?'':'s'}`].filter(Boolean).join(' · ')
+                    [co.region, co.phone, `${co.contact_count||0} contact${co.contact_count===1?'':'s'}`].filter(Boolean).join(' · ')
                   )
                 )
               )
@@ -2166,6 +2192,7 @@ function CompanyAccounts() {
         fieldRow('Address', 'address', newForm, setNewForm),
         fieldRow('Phone', 'phone', newForm, setNewForm),
         fieldRow('Website', 'website', newForm, setNewForm, 'url'),
+        selectRow('Region', 'region', newForm, setNewForm, COMPANY_REGIONS),
         fieldRow('Notes', 'notes', newForm, setNewForm, 'textarea'),
         React.createElement('div', {style:{marginTop:'12px', marginBottom:'4px'}},
           checkboxRow('⭐ Strong Market Partner',       'strong_market_partner',     newForm, setNewForm, '#b45309'),
@@ -2207,6 +2234,7 @@ function CompanyAccounts() {
                 fieldRow('Address', 'address', editForm, setEditForm),
                 fieldRow('Phone', 'phone', editForm, setEditForm),
                 fieldRow('Website', 'website', editForm, setEditForm, 'url'),
+                selectRow('Region', 'region', editForm, setEditForm, COMPANY_REGIONS),
                 fieldRow('Notes', 'notes', editForm, setEditForm, 'textarea'),
                 React.createElement('div', {style:{marginTop:'12px', marginBottom:'4px'}},
                   checkboxRow('⭐ Strong Market Partner',       'strong_market_partner',     editForm, setEditForm, '#b45309'),
@@ -2231,7 +2259,7 @@ function CompanyAccounts() {
                   React.createElement('h3', {style:{fontSize:'18px', fontWeight:700, color:'#1e293b', margin:0}}, selected.name),
                   React.createElement('div', {style:{display:'flex', gap:'6px'}},
                     React.createElement('button', {
-                      onClick: () => setEditForm({name:selected.name||'', address:selected.address||'', phone:selected.phone||'', website:selected.website||'', notes:selected.notes||'', strong_market_partner:selected.strong_market_partner||0, large_account_opportunity:selected.large_account_opportunity||0}),
+                      onClick: () => setEditForm({name:selected.name||'', address:selected.address||'', phone:selected.phone||'', website:selected.website||'', region:selected.region||'', notes:selected.notes||'', strong_market_partner:selected.strong_market_partner||0, large_account_opportunity:selected.large_account_opportunity||0}),
                       style:{background:'#f1f5f9', color:'#475569', border:'none', borderRadius:'6px',
                         padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
                     }, '✏️ Edit'),
@@ -2251,6 +2279,10 @@ function CompanyAccounts() {
                     React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Website'),
                     React.createElement('a', {href:selected.website, target:'_blank', rel:'noopener noreferrer',
                       style:{fontSize:'13px', color:'#2563eb', textDecoration:'none'}}, selected.website)
+                  ),
+                  selected.region && React.createElement('div', null,
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Region'),
+                    React.createElement('div', {style:{fontSize:'13px', color:'#334155'}}, selected.region)
                   ),
                   selected.address && React.createElement('div', {style:{gridColumn:'1/-1'}},
                     React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Address'),
