@@ -151,8 +151,31 @@ const GLASSWORKS_CFG = {
 function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
   const [form, setForm] = useState(quote || {});
   const [saving, setSaving] = useState(false);
+  const [companies, setCompanies] = useState([]);
+  const [acSearch, setAcSearch] = useState('');
+  const [acOpen, setAcOpen]   = useState(false);
 
   const set = (k,v) => setForm(f => ({...f,[k]:v}));
+
+  useEffect(() => {
+    apiFetch('/api/companies').then(cs => {
+      setCompanies(cs);
+      if (quote?.company_id) {
+        const linked = cs.find(c => c.id === quote.company_id);
+        if (linked) setAcSearch(linked.name);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const acFiltered = acSearch
+    ? companies.filter(c => c.name.toLowerCase().includes(acSearch.toLowerCase()))
+    : companies;
+
+  function selectCompany(co) {
+    set('company_id', co ? co.id : null);
+    setAcSearch(co ? co.name : '');
+    setAcOpen(false);
+  }
 
   async function save() {
     setSaving(true);
@@ -177,7 +200,7 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
         React.createElement('button', {onClick:onClose, className:'text-gray-400 hover:text-gray-600 text-2xl leading-none'}, '×')
       ),
       React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 gap-3'},
-        FIELDS.map(f => {
+        FIELDS.flatMap(f => {
           const val = form[f.key] ?? '';
           let el;
           if (f.type === 'select') {
@@ -192,10 +215,61 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
             el = React.createElement('input', {type:f.type==='number'?'number':'text', value:val, onChange:e=>set(f.key,e.target.value)});
           }
           const wide = f.type==='textarea' || f.key==='subject' || f.key==='product';
-          return React.createElement('div', {key:f.key, className:wide?'col-span-2':'col-span-1'},
+          const fieldEl = React.createElement('div', {key:f.key, className:wide?'col-span-2':'col-span-1'},
             React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, f.label),
             el
           );
+
+          // Inject "Linked to Account" combobox right after Customer field
+          if (f.key === 'customer') {
+            const linkedName = form.company_id
+              ? (companies.find(c => c.id === form.company_id)?.name || acSearch)
+              : '';
+            const accountField = React.createElement('div', {key:'linked_account', className:'col-span-1', style:{position:'relative'}},
+              React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, 'Linked to Account'),
+              React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'4px'}},
+                React.createElement('input', {
+                  type:'text',
+                  value: acOpen ? acSearch : (linkedName || acSearch),
+                  placeholder: 'Search company accounts…',
+                  onFocus: () => { setAcOpen(true); setAcSearch(''); },
+                  onChange: e => { setAcSearch(e.target.value); setAcOpen(true); },
+                  onBlur: () => setTimeout(() => setAcOpen(false), 180),
+                  style:{flex:1}
+                }),
+                form.company_id && React.createElement('button', {
+                  type:'button',
+                  onClick: () => selectCompany(null),
+                  style:{background:'none', border:'none', color:'#94a3b8', cursor:'pointer',
+                    fontSize:'18px', lineHeight:1, padding:'0 2px', flexShrink:0}
+                }, '×')
+              ),
+              acOpen && React.createElement('div', {
+                style:{position:'absolute', top:'100%', left:0, right:0, zIndex:200,
+                  background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px',
+                  boxShadow:'0 6px 20px rgba(0,0,0,0.12)', maxHeight:'200px', overflowY:'auto', marginTop:'2px'}
+              },
+                acFiltered.length === 0
+                  ? React.createElement('div', {style:{padding:'10px 14px', fontSize:'12px', color:'#94a3b8'}}, 'No matches')
+                  : acFiltered.map(co => React.createElement('div', {
+                      key: co.id,
+                      onMouseDown: () => selectCompany(co),
+                      style:{
+                        padding:'8px 14px', cursor:'pointer', fontSize:'13px',
+                        background: form.company_id === co.id ? '#EFF6FF' : '#fff',
+                        fontWeight: form.company_id === co.id ? 600 : 400,
+                        borderBottom: '1px solid #f8fafc'
+                      }
+                    },
+                    React.createElement('div', {style:{color:'#1e293b'}}, co.name),
+                    co.region && React.createElement('div', {style:{fontSize:'11px', color:'#64748b'}}, co.region)
+                  ))
+              )
+            );
+            return [fieldEl, accountField];
+          }
+
+          return [fieldEl];
         })
       ),
       React.createElement('div', {className:'flex justify-end gap-2 mt-6'},
