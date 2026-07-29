@@ -2444,6 +2444,66 @@ def delete_company(company_id: int):
         con.execute("DELETE FROM companies WHERE id=?", (company_id,))
         return {"ok": True}
 
+@app.post("/api/companies/import-from-quotes")
+def import_companies_from_quotes():
+    """Scan all quote tables and create Company Account entries from unique customer names,
+    carrying over the most-used region from that customer's quotes."""
+    from collections import defaultdict, Counter
+    with get_db() as con:
+        rows = []
+        for table in ("quotes", "hydrotech_quotes", "glassworks_quotes"):
+            try:
+                rs = con.execute(
+                    f"SELECT customer, region FROM {table} "
+                    f"WHERE (deleted IS NULL OR deleted=0) "
+                    f"AND customer IS NOT NULL AND TRIM(customer) != ''"
+                ).fetchall()
+                rows.extend(rs)
+            except Exception:
+                pass
+
+        # Group all regions seen per customer name (case-insensitive key)
+        customer_map = defaultdict(lambda: {"canonical": "", "regions": []})
+        for row in rows:
+            name = (row["customer"] or "").strip()
+            region = (row["region"] or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            if not customer_map[key]["canonical"]:
+                customer_map[key]["canonical"] = name
+            if region:
+                customer_map[key]["regions"].append(region)
+
+        inserted = updated = skipped = 0
+        for key, info in customer_map.items():
+            name = info["canonical"]
+            non_empty = info["regions"]
+            best_region = Counter(non_empty).most_common(1)[0][0] if non_empty else None
+
+            existing = con.execute(
+                "SELECT id, region FROM companies WHERE LOWER(name) = ?", (key,)
+            ).fetchone()
+
+            if existing:
+                if best_region and not existing["region"]:
+                    con.execute(
+                        "UPDATE companies SET region=?, updated_at=datetime('now') WHERE id=?",
+                        (best_region, existing["id"])
+                    )
+                    updated += 1
+                else:
+                    skipped += 1
+            else:
+                con.execute(
+                    "INSERT INTO companies (name, region) VALUES (?, ?)",
+                    (name, best_region)
+                )
+                inserted += 1
+
+        return {"inserted": inserted, "updated": updated, "skipped": skipped,
+                "total": inserted + updated + skipped}
+
 @app.get("/api/companies/{company_id}/contacts")
 def list_company_contacts(company_id: int):
     with get_db() as con:
