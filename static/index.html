@@ -221,20 +221,21 @@ function Confirm({ message, onYes, onNo }) {
 }
 
 // ── Dashboard view ────────────────────────────────────────────────────────────
-function Dashboard() {
-  const [data, setData]                   = useState(null);
-  const [selMonth, setSelMonth]             = useState('all');
-  const [selRegionMonth, setSelRegionMonth] = useState('avg');
-  const [selPipelineMonth, setSelPipelineMonth] = useState('all');
-  useEffect(() => { apiFetch('/api/dashboard').then(setData).catch(console.error); }, []);
+function Dashboard({ cfg = RMAX_CFG }) {
+  const [data, setData]                        = useState(null);
+  const [selMonth, setSelMonth]                = useState('all');
+  const [selRegionMonth, setSelRegionMonth]    = useState('avg');
+  const [selPipelineMonth, setSelPipelineMonth]= useState('all');
+  useEffect(() => { apiFetch(cfg.dashboardBase).then(setData).catch(console.error); }, [cfg.dashboardBase]);
   if (!data) return React.createElement('div', {className:'p-8 text-gray-400'}, 'Loading…');
 
   const { totals, by_location, by_region, by_region_month, by_month, by_close_month, by_status } = data;
+  const hasRegions = !!(by_region && by_region.length > 0);
 
   // Build month lookup and sorted option list
   const monthMap = {};
-  by_month.forEach(r => { monthMap[r.month] = r; });
-  const monthOptions = [...by_month].reverse(); // most recent first
+  (by_month || []).forEach(r => { monthMap[r.month] = r; });
+  const monthOptions = [...(by_month || [])].reverse();
 
   // Active stats — either a specific month or all-time totals
   const active = selMonth !== 'all' && monthMap[selMonth]
@@ -292,33 +293,34 @@ function Dashboard() {
   const totalVerbal = projData.reduce((s,r) => s + r.verbal, 0);
   const totalAll    = projData.reduce((s,r) => s + (r.total||0), 0);
 
-  // ── Regional monthly chart data ──
-  const rmData        = by_region_month || [];
+  // ── Regional monthly chart data (RMAX only) ──
+  const rmData         = hasRegions ? (by_region_month || []) : [];
   const REGION_ORDER_D = ['Central Texas','Southeast Texas','The Valley','(No Region)'];
-  const allRegionsD   = [...new Set(rmData.map(r => r.region))];
-  const allMonthsRM   = [...new Set(rmData.map(r => r.month))].sort().reverse(); // most recent first
+  const allRegionsD    = hasRegions ? [...new Set(rmData.map(r => r.region))] : [];
+  const allMonthsRM    = hasRegions ? [...new Set(rmData.map(r => r.month))].sort().reverse() : [];
 
-  // Total quote count per region (all-time)
   const regionTotal = {};
   allRegionsD.forEach(region => {
     const rows = rmData.filter(r => r.region === region);
     regionTotal[region] = rows.reduce((s, r) => s + r.count, 0);
   });
-
-  // Specific month quote count per region
   const regionForMonth = {};
   if (selRegionMonth !== 'avg') {
     rmData.filter(r => r.month === selRegionMonth).forEach(r => { regionForMonth[r.region] = r.count; });
   }
-
-  // Ordered chart data: known regions first, then any extras
-  const rmChartData = [
+  const rmChartData = hasRegions ? [
     ...REGION_ORDER_D.filter(r => allRegionsD.includes(r)),
     ...allRegionsD.filter(r => !REGION_ORDER_D.includes(r))
   ].map(region => ({
     region: region === '(No Region)' ? 'No Region' : region,
     count: selRegionMonth === 'avg' ? (regionTotal[region] || 0) : (regionForMonth[region] || 0)
-  }));
+  })) : [];
+
+  // ── Location chart data (Hydrotech / Glassworks) ──
+  const locationChartData = !hasRegions ? (by_location || []).map(r => ({
+    name: r.location || '(No Location)',
+    total: r.total || 0, won: r.won || 0, verbal: r.verbal || 0, count: r.count || 0,
+  })) : [];
 
   // 12-Month Rolling Projected Sales chart data (by close_date)
   const closeMap = {};
@@ -343,8 +345,8 @@ function Dashboard() {
   const projVerbal = projSalesData.reduce((s,r) => s + r.verbal, 0);
   const projOpen   = projSalesData.reduce((s,r) => s + r.open,   0);
 
-  // Pipeline by Region chart data (amount-based, supports month filter)
-  const pipelineChartData = (() => {
+  // Pipeline chart data — region-based (RMAX) or location-based (others)
+  const pipelineChartData = hasRegions ? (() => {
     const regionOrder = [
       ...REGION_ORDER_D.filter(r => (by_region||[]).some(x => x.region === r || (r === '(No Region)' && x.region === '(No Region)'))),
       ...(by_region||[]).map(x => x.region).filter(r => !REGION_ORDER_D.includes(r))
@@ -365,7 +367,7 @@ function Dashboard() {
       won:    (byReg[region] || {won:0}).won      || 0,
       verbal: (byReg[region] || {verbal:0}).verbal || 0,
     })).filter(r => r.total > 0 || r.won > 0 || r.verbal > 0);
-  })();
+  })() : locationChartData.map(r => ({region: r.name, total: r.total, won: r.won, verbal: r.verbal}));
 
   return React.createElement('div', {className:'space-y-6'},
     // KPI row with month selector
@@ -487,13 +489,13 @@ function Dashboard() {
       )
     ),
 
-    // Bottom row: location chart + status table
+    // Bottom row: Pipeline + Quote count charts
     React.createElement('div', {className:'grid grid-cols-1 lg:grid-cols-2 gap-6'},
-      // By region
+      // Left: Pipeline by Region (RMAX) or Pipeline by Location (others)
       React.createElement('div', {className:'card'},
         React.createElement('div', {className:'flex items-center justify-between mb-4'},
-          React.createElement('h3', {className:'font-semibold text-gray-700'}, 'Pipeline by Region'),
-          React.createElement('select', {
+          React.createElement('h3', {className:'font-semibold text-gray-700'}, hasRegions ? 'Pipeline by Region' : 'Pipeline by Location'),
+          hasRegions && React.createElement('select', {
             value: selPipelineMonth,
             onChange: e => setSelPipelineMonth(e.target.value),
             style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
@@ -507,10 +509,10 @@ function Dashboard() {
           )
         ),
         React.createElement(ResponsiveContainer, {width:'100%', height:260},
-          React.createElement(BarChart, {data:pipelineChartData, layout:'vertical', margin:{top:5,right:10,left:110,bottom:5}},
+          React.createElement(BarChart, {data:pipelineChartData, layout:'vertical', margin:{top:5,right:10,left:130,bottom:5}},
             React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
             React.createElement(XAxis, {type:'number', tickFormatter:v=>'$'+Math.round(v/1000)+'k', tick:{fontSize:11}}),
-            React.createElement(YAxis, {type:'category', dataKey:'region', tick:{fontSize:10}, width:110}),
+            React.createElement(YAxis, {type:'category', dataKey:'region', tick:{fontSize:10}, width:130}),
             React.createElement(Tooltip, {formatter:(v,n)=>[fmt(v),n]}),
             React.createElement(Legend),
             React.createElement(Bar, {dataKey:'total',  name:'Total Quoted', fill:'#3b82f6', radius:[0,4,4,0]}),
@@ -520,49 +522,67 @@ function Dashboard() {
         )
       ),
 
-      // Total Quotes by Region
+      // Right: Total Quotes by Region (RMAX) or Quotes by Location (others)
       React.createElement('div', {className:'card'},
-        React.createElement('div', {className:'flex items-center justify-between mb-1'},
-          React.createElement('h3', {className:'font-semibold text-gray-700'}, 'Total Quotes by Region'),
-          React.createElement('select', {
-            value: selRegionMonth,
-            onChange: e => setSelRegionMonth(e.target.value),
-            style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
-                   background:'#fff', color:'#374151', cursor:'pointer', width:'170px'},
-          },
-            React.createElement('option', {value:'avg'}, 'Overall (Year)'),
-            allMonthsRM.map(m => {
-              const label = new Date(m + '-02').toLocaleDateString('en-US',{month:'short',year:'numeric'});
-              return React.createElement('option', {key:m, value:m}, label);
-            })
-          )
-        ),
-        React.createElement('p', {className:'text-xs text-gray-400 mb-4'},
-          selRegionMonth === 'avg'
-            ? 'Total number of quotes per region across all time'
-            : 'Number of quotes per region for the selected month'
-        ),
-        React.createElement(ResponsiveContainer, {width:'100%', height:220},
-          React.createElement(BarChart, {data:rmChartData, margin:{top:20,right:20,left:10,bottom:5}},
-            React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
-            React.createElement(XAxis, {dataKey:'region', tick:{fontSize:11}}),
-            React.createElement(YAxis, {allowDecimals:false, tick:{fontSize:11}, width:35}),
-            React.createElement(Tooltip, {formatter:(v)=>[v, 'Quotes']}),
-            React.createElement(Bar, {dataKey:'count', name:'Quotes', radius:[4,4,0,0],
-              label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#374151'}
-            },
-              rmChartData.map((entry, i) => {
-                const REGION_COLORS = {
-                  'Central Texas':   '#3b82f6',
-                  'Southeast Texas': '#f97316',
-                  'The Valley':      '#16a34a',
-                  'No Region':       '#9ca3af',
-                };
-                return React.createElement(Cell, {key:i, fill: REGION_COLORS[entry.region] || '#6b7280'});
-              })
+        hasRegions
+          ? React.createElement(React.Fragment, null,
+              React.createElement('div', {className:'flex items-center justify-between mb-1'},
+                React.createElement('h3', {className:'font-semibold text-gray-700'}, 'Total Quotes by Region'),
+                React.createElement('select', {
+                  value: selRegionMonth,
+                  onChange: e => setSelRegionMonth(e.target.value),
+                  style:{fontSize:'13px', padding:'4px 8px', borderRadius:'7px', border:'1px solid #d1d5db',
+                         background:'#fff', color:'#374151', cursor:'pointer', width:'170px'},
+                },
+                  React.createElement('option', {value:'avg'}, 'Overall (Year)'),
+                  allMonthsRM.map(m => {
+                    const label = new Date(m + '-02').toLocaleDateString('en-US',{month:'short',year:'numeric'});
+                    return React.createElement('option', {key:m, value:m}, label);
+                  })
+                )
+              ),
+              React.createElement('p', {className:'text-xs text-gray-400 mb-4'},
+                selRegionMonth === 'avg'
+                  ? 'Total number of quotes per region across all time'
+                  : 'Number of quotes per region for the selected month'
+              ),
+              React.createElement(ResponsiveContainer, {width:'100%', height:220},
+                React.createElement(BarChart, {data:rmChartData, margin:{top:20,right:20,left:10,bottom:5}},
+                  React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+                  React.createElement(XAxis, {dataKey:'region', tick:{fontSize:11}}),
+                  React.createElement(YAxis, {allowDecimals:false, tick:{fontSize:11}, width:35}),
+                  React.createElement(Tooltip, {formatter:(v)=>[v, 'Quotes']}),
+                  React.createElement(Bar, {dataKey:'count', name:'Quotes', radius:[4,4,0,0],
+                    label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#374151'}
+                  },
+                    rmChartData.map((entry, i) => {
+                      const REGION_COLORS = {
+                        'Central Texas':   '#3b82f6',
+                        'Southeast Texas': '#f97316',
+                        'The Valley':      '#16a34a',
+                        'No Region':       '#9ca3af',
+                      };
+                      return React.createElement(Cell, {key:i, fill: REGION_COLORS[entry.region] || '#6b7280'});
+                    })
+                  )
+                )
+              )
             )
-          )
-        )
+          : React.createElement(React.Fragment, null,
+              React.createElement('h3', {className:'font-semibold text-gray-700 mb-1'}, 'Quotes by Location'),
+              React.createElement('p', {className:'text-xs text-gray-400 mb-4'}, 'Total number of quotes per location across all time'),
+              React.createElement(ResponsiveContainer, {width:'100%', height:220},
+                React.createElement(BarChart, {data:locationChartData, margin:{top:20,right:20,left:10,bottom:40}},
+                  React.createElement(CartesianGrid, {strokeDasharray:'3 3', stroke:'#f0f0f0'}),
+                  React.createElement(XAxis, {dataKey:'name', tick:{fontSize:10}, angle:-30, textAnchor:'end', interval:0}),
+                  React.createElement(YAxis, {allowDecimals:false, tick:{fontSize:11}, width:35}),
+                  React.createElement(Tooltip, {formatter:(v)=>[v, 'Quotes']}),
+                  React.createElement(Bar, {dataKey:'count', name:'Quotes', fill:'#0e7490', radius:[4,4,0,0],
+                    label:{position:'top', formatter:v=>v>0?v:'', fontSize:12, fontWeight:600, fill:'#374151'}
+                  })
+                )
+              )
+            )
       )
     )
   );
@@ -2019,23 +2039,27 @@ function App() {
 
     // Content
     React.createElement('main', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-6'},
-      tab === 'dashboard' ? React.createElement(Dashboard, {key:refresh})
-      : tab === 'sales'      ? React.createElement(SalesTab)
-      : tab === 'directory'  ? React.createElement(CustomerDirectory, {key:'dir'})
-      : tab === 'hydrotech' ? React.createElement(QuoteList, {
+      tab === 'dashboard'           ? React.createElement(Dashboard, {key:'rmax-dash',    cfg: RMAX_CFG})
+      : tab === 'hydrotech-dashboard' ? React.createElement(Dashboard, {key:'ht-dash',      cfg: HYDROTECH_CFG})
+      : tab === 'glassworks-dashboard'? React.createElement(Dashboard, {key:'gw-dash',      cfg: GLASSWORKS_CFG})
+      : tab === 'sales'               ? React.createElement(SalesTab)
+      : tab === 'directory'           ? React.createElement(CustomerDirectory, {key:'dir'})
+      : tab === 'hydrotech'           ? React.createElement(QuoteList, {
           key: 'hydrotech',
           refresh,
           onEdit: q => openEdit(q, HYDROTECH_CFG),
           onNew: () => openEdit({}, HYDROTECH_CFG),
+          onDashboard: () => setTab('hydrotech-dashboard'),
           onRefresh: () => doRefresh(HYDROTECH_CFG),
           syncing, syncMsg,
           cfg: HYDROTECH_CFG,
         })
-      : tab === 'glassworks' ? React.createElement(QuoteList, {
+      : tab === 'glassworks'          ? React.createElement(QuoteList, {
           key: 'glassworks',
           refresh,
           onEdit: q => openEdit(q, GLASSWORKS_CFG),
           onNew: () => openEdit({}, GLASSWORKS_CFG),
+          onDashboard: () => setTab('glassworks-dashboard'),
           onRefresh: () => doRefresh(GLASSWORKS_CFG),
           syncing, syncMsg,
           cfg: GLASSWORKS_CFG,
