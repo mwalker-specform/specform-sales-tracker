@@ -119,6 +119,24 @@ async function apiFetch(path, opts={}) {
   return res.json();
 }
 
+// ── Authenticated file download ───────────────────────────────────────────────
+async function downloadExport(url) {
+  const token = sessionStorage.getItem('auth_token');
+  try {
+    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!res.ok) { alert('Export failed — please try again.'); return; }
+    const blob = await res.blob();
+    const cd   = res.headers.get('Content-Disposition') || '';
+    const m    = cd.match(/filename[^;=\n]*=['"]?([^'"\n]+)['"]?/);
+    const name = m ? m[1] : 'export.xlsx';
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch(e) { alert('Export failed: ' + e.message); }
+}
+
 // ── Status badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
   if (!status) return React.createElement('span', {className:'text-gray-400 text-xs'}, '—');
@@ -799,7 +817,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
         React.createElement('button', {
           className:'btn flex items-center gap-2',
           style:{background:'#16a34a', color:'#fff', border:'none'},
-          onClick: () => { window.location.href = exportUrl; }
+          onClick: () => downloadExport(exportUrl)
         }, '⬇ Export to Excel'),
         React.createElement('button', {
           className:'btn btn-primary flex items-center gap-2',
@@ -2376,14 +2394,13 @@ function CompanyAccounts() {
         React.createElement('div', {style:{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px'}},
           React.createElement('h2', {style:{fontSize:'15px', fontWeight:700, color:'#1F4E79', margin:0}}, '🏢 Companies'),
           React.createElement('div', {style:{display:'flex', gap:'5px'}},
-            React.createElement('a', {
-              href: '/api/companies/export',
-              download: 'company_accounts.xlsx',
+            React.createElement('button', {
+              onClick: () => downloadExport('/api/companies/export'),
               title: 'Export all companies + contacts to Excel',
               style:{
                 background:'#16a34a', color:'#fff', border:'none', borderRadius:'6px',
                 padding:'4px 9px', fontSize:'11px', fontWeight:600, cursor:'pointer',
-                textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'3px'
+                display:'inline-flex', alignItems:'center', gap:'3px'
               }
             }, '📥 Export'),
             React.createElement('button', {
