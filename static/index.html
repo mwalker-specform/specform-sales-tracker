@@ -1022,7 +1022,10 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                             apiFetch(`${quotesBase}/${q.id}`, {method:'PUT', body:JSON.stringify({...q, completed: e.target.checked?1:0})}).then(()=>load(true));
                           }
                         }),
-                        'Completed'
+                        'Completed',
+                        q.completed && q.completed_date && React.createElement('span', {
+                          style:{marginLeft:'4px', color:'#6b7280', fontWeight:400}
+                        }, q.completed_date)
                       )
                     )
                   ),
@@ -1538,8 +1541,17 @@ function CustomerDirectory() {
   const [adding,      setAdding]      = useState(false);
   const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',region:'',notes:''});
   const [regionFilter, setRegionFilter] = useState('All');
+  const [companies,    setCompanies]   = useState([]);
+  const [editLinkedCo, setEditLinkedCo] = useState(null);
+  const [editCoSearch, setEditCoSearch] = useState('');
+  const [newLinkedCo,  setNewLinkedCo]  = useState(null);
+  const [newCoSearch,  setNewCoSearch]  = useState('');
   const CUSTOMER_TYPES = ['','Contractor','Distributor','General Contractor','Architect'];
   const REGIONS = ['','Central Texas','Southeast Texas','The Valley'];
+
+  useEffect(() => {
+    apiFetch('/api/companies').then(data => setCompanies(data || [])).catch(() => {});
+  }, []);
 
   function loadContacts(f, s) {
     setLoading(true);
@@ -1587,10 +1599,38 @@ function CustomerDirectory() {
       .finally(() => { setScanning(false); setTimeout(() => setImportMsg(''), 10000); });
   }
 
-  function startEdit(c) { setEditingId(c.id); setEditForm({...c}); }
-  function cancelEdit() { setEditingId(null); setEditForm({}); }
+  function startEdit(c) {
+    setEditingId(c.id);
+    setEditForm({...c});
+    const linked = c.linked_company_id
+      ? (companies.find(co => co.id === c.linked_company_id) || {id:c.linked_company_id, name:c.linked_company_name||'Unknown'})
+      : null;
+    setEditLinkedCo(linked);
+    setEditCoSearch('');
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditForm({});
+    setEditLinkedCo(null);
+    setEditCoSearch('');
+  }
   function saveEdit() {
-    apiFetch(`/api/contacts/${editingId}`, {method:'PUT', body:JSON.stringify(editForm)})
+    const contactId = editingId;
+    const prevLinkedId = editForm.linked_company_id || null;
+    apiFetch(`/api/contacts/${contactId}`, {method:'PUT', body:JSON.stringify(editForm)})
+      .then(() => {
+        const tasks = [];
+        if (editLinkedCo && editLinkedCo.id !== prevLinkedId) {
+          if (prevLinkedId) tasks.push(apiFetch(`/api/companies/${prevLinkedId}/contacts/${contactId}`, {method:'DELETE'}).catch(()=>{}));
+          tasks.push(apiFetch(`/api/companies/${editLinkedCo.id}/contacts`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({contact_id:contactId, role:''})
+          }).catch(()=>{}));
+        } else if (!editLinkedCo && prevLinkedId) {
+          tasks.push(apiFetch(`/api/companies/${prevLinkedId}/contacts/${contactId}`, {method:'DELETE'}).catch(()=>{}));
+        }
+        return Promise.all(tasks);
+      })
       .then(() => { cancelEdit(); loadContacts(); });
   }
   function deleteContact(id) {
@@ -1617,9 +1657,20 @@ function CustomerDirectory() {
   }
   function saveNew() {
     apiFetch('/api/contacts', {method:'POST', body:JSON.stringify(newForm)})
+      .then(data => {
+        const linkTask = newLinkedCo && data.id
+          ? apiFetch(`/api/companies/${newLinkedCo.id}/contacts`, {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({contact_id:data.id, role:''})
+            }).catch(()=>{})
+          : Promise.resolve();
+        return linkTask;
+      })
       .then(() => {
         setAdding(false);
         setNewForm({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',notes:''});
+        setNewLinkedCo(null);
+        setNewCoSearch('');
         loadContacts();
       })
       .catch(() => alert('Could not save — check that the email address is unique'));
@@ -1712,7 +1763,12 @@ function CustomerDirectory() {
         c.company && React.createElement('div', {
           className:'text-xs text-gray-500 text-center mt-0.5 w-full truncate font-medium',
           title:c.company
-        }, c.company)
+        }, c.company),
+        c.linked_company_name && React.createElement('div', {
+          className:'text-xs font-semibold mt-1 px-2 py-0.5 rounded-full truncate',
+          style:{background:'#dbeafe',color:'#1e40af',maxWidth:'100%'},
+          title:'Linked account: '+c.linked_company_name
+        }, '🏢 ' + c.linked_company_name)
       ),
       // Contact info rows
       React.createElement('div', {className:'px-4 py-3 flex-1 space-y-2'},
@@ -1772,8 +1828,50 @@ function CustomerDirectory() {
     );
   }
 
+  // Searchable company-link field
+  function renderCompanyLinkField(linkedCo, setLinkedCo, coSearch, setCoSearch) {
+    const filtered = coSearch
+      ? companies.filter(c => c.name.toLowerCase().includes(coSearch.toLowerCase())).slice(0,8)
+      : [];
+    return React.createElement('div', {className:'sm:col-span-2'},
+      React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, 'Linked Account'),
+      React.createElement('div', {style:{position:'relative'}},
+        React.createElement('input', {
+          type:'text',
+          placeholder: linkedCo ? linkedCo.name : 'Search company accounts…',
+          value: coSearch,
+          onChange: e => setCoSearch(e.target.value),
+          className:'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300'
+        }),
+        filtered.length > 0 && React.createElement('div', {
+          style:{position:'absolute',top:'100%',left:0,right:0,zIndex:99,
+                 background:'#fff',border:'1px solid #d1d5db',borderRadius:'8px',
+                 boxShadow:'0 4px 12px rgba(0,0,0,0.12)',maxHeight:'160px',overflowY:'auto',marginTop:'2px'}
+        },
+          filtered.map(co => React.createElement('div', {
+            key:co.id,
+            onMouseDown: e => { e.preventDefault(); setLinkedCo(co); setCoSearch(''); },
+            style:{padding:'8px 12px',fontSize:'13px',cursor:'pointer'},
+            className:'hover:bg-blue-50'
+          }, co.name))
+        )
+      ),
+      linkedCo && React.createElement('div', {className:'flex items-center gap-2 mt-1.5'},
+        React.createElement('span', {
+          className:'text-xs font-semibold px-2 py-0.5 rounded-full',
+          style:{background:'#dbeafe',color:'#1e40af'}
+        }, '🏢 ' + linkedCo.name),
+        React.createElement('button', {
+          type:'button',
+          onClick: () => { setLinkedCo(null); setCoSearch(''); },
+          className:'text-xs text-gray-400 hover:text-red-500'
+        }, '✕ Remove')
+      )
+    );
+  }
+
   // Modal renderer (not a component — avoids remount issues)
-  function renderModal(title, form, setForm, onSave, onCancel, extraActions) {
+  function renderModal(title, form, setForm, onSave, onCancel, extraActions, additionalFields) {
     return React.createElement('div', {
       className:'fixed inset-0 z-50 flex items-center justify-center p-4',
       style:{background:'rgba(0,0,0,0.45)'},
@@ -1798,7 +1896,8 @@ function CustomerDirectory() {
           formField('Customer Type','customer_type',form,setForm,'ctype'),
           React.createElement('div', {className:'sm:col-span-2'},
             formField('Notes','notes',form,setForm,'textarea')
-          )
+          ),
+          ...(additionalFields || [])
         ),
         React.createElement('div', {className:'flex items-center justify-between px-6 py-4 border-t bg-gray-50'},
           React.createElement('div', {}, extraActions || null),
@@ -1994,14 +2093,17 @@ function CustomerDirectory() {
         onClick: () => fetchSig(editForm.email, editingId),
         disabled: sigFetching === editForm.email,
         className:'text-sm text-blue-600 hover:text-blue-800 disabled:opacity-40'
-      }, sigFetching === editForm.email ? '⏳ Fetching…' : '✉ Fetch from email sig')
+      }, sigFetching === editForm.email ? '⏳ Fetching…' : '✉ Fetch from email sig'),
+      [renderCompanyLinkField(editLinkedCo, setEditLinkedCo, editCoSearch, setEditCoSearch)]
     ),
 
     // ── Add contact modal ──
     adding && renderModal(
       'New Contact',
       newForm, setNewForm,
-      saveNew, () => setAdding(false)
+      saveNew, () => { setAdding(false); setNewLinkedCo(null); setNewCoSearch(''); },
+      null,
+      [renderCompanyLinkField(newLinkedCo, setNewLinkedCo, newCoSearch, setNewCoSearch)]
     )
   );
 }
@@ -2032,7 +2134,6 @@ function CompanyAccounts() {
   const [saving,        setSaving]        = useState(false);
   const [msg,           setMsg]           = useState('');
   const [regionFilter,  setRegionFilter]  = useState('All');
-  const [importing,     setImporting]     = useState(false);
 
   function loadCompanies(s, r) {
     setLoading(true);
@@ -2068,17 +2169,6 @@ function CompanyAccounts() {
   }
 
   useEffect(() => { loadCompanies(); loadAllContacts(); }, []);
-
-  function importFromQuotes() {
-    setImporting(true);
-    apiFetch('/api/companies/import-from-quotes', { method: 'POST' })
-      .then(data => {
-        flash(`✓ ${data.inserted} new companies added, ${data.updated} regions filled in, ${data.skipped} already existed`);
-        loadCompanies();
-      })
-      .catch(() => flash('❌ Import failed'))
-      .finally(() => setImporting(false));
-  }
 
   function selectCompany(co) {
     setSelected(co);
@@ -2278,13 +2368,6 @@ function CompanyAccounts() {
         React.createElement('div', {style:{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px'}},
           React.createElement('h2', {style:{fontSize:'15px', fontWeight:700, color:'#1F4E79', margin:0}}, '🏢 Companies'),
           React.createElement('div', {style:{display:'flex', gap:'5px'}},
-            React.createElement('button', {
-              onClick: importFromQuotes,
-              disabled: importing,
-              title: 'Import company names from all quotes',
-              style:{background:'#0e7490', color:'#fff', border:'none', borderRadius:'6px',
-                padding:'4px 8px', fontSize:'11px', fontWeight:600, cursor:'pointer', opacity: importing ? 0.6 : 1}
-            }, importing ? '⏳' : '⬇ Import'),
             React.createElement('a', {
               href: '/api/companies/export',
               download: 'company_accounts.xlsx',
