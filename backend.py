@@ -295,129 +295,184 @@ def delete_quote(quote_id: int):
 
 @app.get("/api/quotes-export")
 def export_quotes():
-    """Export all quotes to a formatted Excel file."""
+    """Export RMAX quotes grouped by month → region, styled like Company Accounts."""
+    import io
     import openpyxl
-    from openpyxl.styles import (Font, PatternFill, Alignment, Border, Side)
+    from collections import defaultdict
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
     from fastapi.responses import StreamingResponse
-    import io
+
+    thin     = Side(style="thin", color="D1D5DB")
+    BORDER   = Border(left=thin, right=thin, top=thin, bottom=thin)
+    CTR      = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    LEFT     = Alignment(horizontal="left", vertical="center")
+    INDENTED = Alignment(horizontal="left", vertical="center", indent=1)
+
+    HDR_FILL    = PatternFill("solid", fgColor="1F4E79")
+    HDR_FONT    = Font(bold=True, color="FFFFFF", size=11)
+    MONTH_FILL  = PatternFill("solid", fgColor="1F4E79")
+    MONTH_FONT  = Font(bold=True, color="FFFFFF", size=12)
+    REGION_FILL = PatternFill("solid", fgColor="DBEAFE")
+    REGION_FONT = Font(bold=True, color="1E3A5F", size=10)
+    ALT_FILL    = PatternFill("solid", fgColor="F4F6F8")
+    STATUS_FILLS = {
+        "Won":         PatternFill("solid", fgColor="D9EAD3"),
+        "Lost":        PatternFill("solid", fgColor="F4CCCC"),
+        "Verbal":      PatternFill("solid", fgColor="FFF2CC"),
+        "Not Awarded": PatternFill("solid", fgColor="FFE4CC"),
+        "Unlikely":    PatternFill("solid", fgColor="EDE9FE"),
+        "Duplicate":   PatternFill("solid", fgColor="F3F4F6"),
+    }
+    MONEY_FMT    = "$#,##0.00"
+    REGION_ORDER = ["Central Texas", "Southeast Texas", "The Valley"]
+    NCOLS        = 13
+
+    HEADERS = [
+        ("Date Received", 14), ("Status", 12), ("Job Name", 28), ("Customer", 22),
+        ("Location", 18), ("Sent To", 20), ("Product", 16), ("Price", 12),
+        ("Quantities", 14), ("Amount ($)", 14), ("Close Date", 14),
+        ("Est. Freight", 14), ("Notes", 35),
+    ]
 
     with get_db() as con:
         rows = con.execute("""
-            SELECT id, status, date_received, date_quoted, sent_to, subject,
-                   job_name, customer, location, product, price, quantities,
-                   amount, close_date, est_freight, lead_time, notes,
-                   add_to_salesforce, completed
-            FROM quotes WHERE (deleted IS NULL OR deleted=0) ORDER BY date_received DESC
+            SELECT date_received, status, job_name, subject, customer, location,
+                   region, sent_to, product, price, quantities, amount,
+                   close_date, est_freight, lead_time, notes
+            FROM quotes WHERE (deleted IS NULL OR deleted=0)
+            ORDER BY date_received DESC
         """).fetchall()
+
+    # Group: month (YYYY-MM) → region → [quotes]
+    month_region = defaultdict(lambda: defaultdict(list))
+    no_date_region = defaultdict(list)
+
+    for q in rows:
+        dr = q["date_received"] or ""
+        dt = parse_date(dr)
+        ym = dt.strftime("%Y-%m") if dt else None
+        region = (q["region"] or "").strip() or "(No Region)"
+        if ym:
+            month_region[ym][region].append(q)
+        else:
+            no_date_region[region].append(q)
+
+    sorted_months = sorted(month_region.keys(), reverse=True)
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "RMAX Quotes"
 
-    # ── Styles ────────────────────────────────────────────────────────────────
-    header_font  = Font(name='Calibri', bold=True, color='FFFFFF', size=11)
-    header_fill  = PatternFill('solid', fgColor='1F4E79')
-    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    border_side  = Side(style='thin', color='BFBFBF')
-    cell_border  = Border(left=border_side, right=border_side,
-                          top=border_side, bottom=border_side)
-    zebra_fill   = PatternFill('solid', fgColor='EBF3FB')
+    # ── Column header row ──────────────────────────────────────────────────────
+    for col, (label, width) in enumerate(HEADERS, 1):
+        cell = ws.cell(row=1, column=col, value=label)
+        cell.fill, cell.font, cell.alignment, cell.border = HDR_FILL, HDR_FONT, CTR, BORDER
+        ws.column_dimensions[get_column_letter(col)].width = width
+    ws.row_dimensions[1].height = 22
 
-    STATUS_FILLS = {
-        'Won':      PatternFill('solid', fgColor='D9EAD3'),
-        'Lost':     PatternFill('solid', fgColor='F4CCCC'),
-        'Verbal':   PatternFill('solid', fgColor='FFF2CC'),
-        'Pending':  PatternFill('solid', fgColor='CFE2F3'),
-    }
+    cur_row = 2
 
-    # ── Headers ───────────────────────────────────────────────────────────────
-    headers = [
-        ('ID',              8),
-        ('Status',          12),
-        ('Date Received',   14),
-        ('Date Quoted',     14),
-        ('Sent To',         22),
-        ('Subject',         30),
-        ('Job Name',        28),
-        ('Customer',        22),
-        ('Location',        18),
-        ('Product',         16),
-        ('Price',           12),
-        ('Quantities',      14),
-        ('Amount',          14),
-        ('Close Date',      14),
-        ('Est. Freight',    14),
-        ('Lead Time',       14),
-        ('Notes',           35),
-        ('Salesforce',      12),
-        ('Completed',       12),
-    ]
+    def region_sort_key(r):
+        try:
+            return (REGION_ORDER.index(r), r)
+        except ValueError:
+            return (len(REGION_ORDER), r)
 
-    ws.row_dimensions[1].height = 30
-    for col_idx, (label, width) in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=label)
-        cell.font        = header_font
-        cell.fill        = header_fill
-        cell.alignment   = header_align
-        cell.border      = cell_border
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    def write_group(ym, region_dict):
+        nonlocal cur_row
 
-    # ── Freeze header row ─────────────────────────────────────────────────────
-    ws.freeze_panes = 'A2'
+        # Month label
+        if ym and ym != "(No Date)":
+            try:
+                month_label = datetime.strptime(ym + "-01", "%Y-%m-%d").strftime("%B %Y")
+            except Exception:
+                month_label = ym
+        else:
+            month_label = "(No Date)"
 
-    # ── Data rows ─────────────────────────────────────────────────────────────
-    for row_idx, q in enumerate(rows, start=2):
-        status = q['status'] or ''
-        row_fill = STATUS_FILLS.get(status, (zebra_fill if row_idx % 2 == 0 else None))
+        all_qs     = [q for qs in region_dict.values() for q in qs]
+        month_tot  = sum(q["amount"] or 0 for q in all_qs)
 
-        values = [
-            q['id'],
-            q['status'],
-            q['date_received'],
-            q['date_quoted'],
-            q['sent_to'],
-            q['subject'],
-            q['job_name'],
-            q['customer'],
-            q['location'],
-            q['product'],
-            q['price'],
-            q['quantities'],
-            q['amount'],
-            q['close_date'],
-            q['est_freight'],
-            q['lead_time'],
-            q['notes'],
-            'Yes' if q['add_to_salesforce'] else '',
-            'Yes' if q['completed'] else '',
-        ]
+        # Month header row
+        for col in range(1, NCOLS + 1):
+            cell = ws.cell(row=cur_row, column=col)
+            if col == 1:
+                cell.value, cell.font, cell.alignment = month_label, MONTH_FONT, LEFT
+            elif col == NCOLS:
+                cell.value = f"{len(all_qs)} quote{'s' if len(all_qs) != 1 else ''} · ${month_tot:,.0f}"
+                cell.font      = Font(bold=True, color="BDD7EE", size=10)
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            cell.fill, cell.border = MONTH_FILL, BORDER
+        ws.row_dimensions[cur_row].height = 22
+        cur_row += 1
 
-        for col_idx, value in enumerate(values, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=value)
-            cell.border    = cell_border
-            cell.alignment = Alignment(vertical='top', wrap_text=(col_idx in (6,7,17)))
-            if row_fill:
-                cell.fill = row_fill
-            # Format amount as currency
-            if col_idx == 13 and value is not None:
-                cell.number_format = '$#,##0.00'
-            # Center status, flags
-            if col_idx in (1, 2, 18, 19):
-                cell.alignment = Alignment(horizontal='center', vertical='top')
+        for region in sorted(region_dict.keys(), key=region_sort_key):
+            q_list     = region_dict[region]
+            region_tot = sum(q["amount"] or 0 for q in q_list)
 
-    # ── Auto-filter ───────────────────────────────────────────────────────────
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+            # Region sub-header row
+            for col in range(1, NCOLS + 1):
+                cell = ws.cell(row=cur_row, column=col)
+                if col == 1:
+                    cell.value, cell.font, cell.alignment = region, REGION_FONT, INDENTED
+                elif col == NCOLS:
+                    cell.value = f"{len(q_list)} quote{'s' if len(q_list) != 1 else ''} · ${region_tot:,.0f}"
+                    cell.font      = Font(bold=True, color="1E3A5F", size=9)
+                    cell.alignment = Alignment(horizontal="right", vertical="center")
+                cell.fill, cell.border = REGION_FILL, BORDER
+            ws.row_dimensions[cur_row].height = 18
+            cur_row += 1
 
-    # ── Stream response ───────────────────────────────────────────────────────
+            # Quote data rows
+            for idx, q in enumerate(q_list):
+                status   = q["status"] or ""
+                row_fill = STATUS_FILLS.get(status, (ALT_FILL if idx % 2 == 1 else PatternFill()))
+                row_font = Font(size=9, bold=(status == "Won"))
+
+                vals = [
+                    q["date_received"],
+                    q["status"],
+                    q["job_name"] or q["subject"] or "",
+                    q["customer"],
+                    q["location"],
+                    q["sent_to"],
+                    q["product"],
+                    q["price"],
+                    q["quantities"],
+                    q["amount"],
+                    q["close_date"],
+                    q["est_freight"],
+                    q["notes"],
+                ]
+
+                for col, v in enumerate(vals, 1):
+                    cell = ws.cell(row=cur_row, column=col, value=v)
+                    cell.fill, cell.font, cell.border = row_fill, row_font, BORDER
+                    cell.alignment = Alignment(wrap_text=(col == NCOLS), vertical="top")
+                    if col == 10 and v is not None:
+                        cell.number_format = MONEY_FMT
+                    if col == 2:
+                        cell.alignment = Alignment(horizontal="center", vertical="top")
+                ws.row_dimensions[cur_row].height = 14
+                cur_row += 1
+
+    for ym in sorted_months:
+        write_group(ym, month_region[ym])
+
+    if no_date_region:
+        write_group("(No Date)", no_date_region)
+
+    ws.freeze_panes = "A2"
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
     filename = f"RMAX_Quotes_{datetime.now().strftime('%Y%m%d')}.xlsx"
     return StreamingResponse(
         buf,
-        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
 # ── Sync endpoint — pulls directly from Outlook "RMAX Quotes" folder ──────────
