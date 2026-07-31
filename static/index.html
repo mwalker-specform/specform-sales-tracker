@@ -2319,7 +2319,7 @@ function CompanyAccounts() {
         React.createElement('div', {style:{fontSize:'10px', fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', textAlign:'right'}}, 'Quoted')
       ),
 
-      // List — grouped by region, sorted by total_quoted desc within each group
+      // List — 3-level: Product Line → Region → Companies
       React.createElement('div', {style:{flex:1, overflowY:'auto', minHeight:0}},
         loading
           ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#9ca3af', fontSize:'13px'}}, 'Loading…')
@@ -2333,76 +2333,105 @@ function CompanyAccounts() {
                        : '$' + v.toFixed(0);
                 };
                 const REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
-                const grouped = {};
-                companies.forEach(co => {
-                  const r = co.region || 'No Region';
-                  if (!grouped[r]) grouped[r] = [];
-                  grouped[r].push(co);
-                });
-                Object.values(grouped).forEach(arr =>
-                  arr.sort((a,b) => (b.total_quoted||0) - (a.total_quoted||0))
-                );
-                const knownRegions = REGION_ORDER.filter(r => grouped[r]);
-                const otherRegions = Object.keys(grouped).filter(r => !REGION_ORDER.includes(r) && r !== 'No Region');
-                const regionKeys = [...knownRegions, ...otherRegions, ...(grouped['No Region'] ? ['No Region'] : [])];
+                const PRODUCT_LINES = [
+                  {key:'rmax',       label:'RMAX',       field:'rmax_quoted',       bg:'#1e3a5f', accent:'#1F4E79'},
+                  {key:'hydrotech',  label:'Hydrotech',  field:'hydrotech_quoted',  bg:'#064e3b', accent:'#065f46'},
+                  {key:'glassworks', label:'Glassworks', field:'glassworks_quoted', bg:'#7c2d12', accent:'#9a3412'},
+                ];
 
-                let globalRowIdx = 0;
-                return regionKeys.flatMap(region => [
-                  // Region header — full-width spanning all columns
-                  React.createElement('div', {
-                    key: 'hdr-' + region,
+                const makeCompanyRow = (co, amtField, rowIdx) => {
+                  const isSelected = selected && selected.id === co.id;
+                  const rowBg = isSelected ? '#dbeafe' : (rowIdx % 2 === 0 ? '#ffffff' : '#f4f6f8');
+                  return React.createElement('div', {
+                    key: co.id + '-' + amtField,
+                    onClick: () => selectCompany(co),
                     style:{
-                      padding:'5px 14px', fontSize:'10px', fontWeight:700,
-                      color:'#1F4E79', textTransform:'uppercase', letterSpacing:'0.08em',
-                      background:'#dbeafe', borderBottom:'1px solid #bfdbfe',
-                      display:'flex', alignItems:'center', justifyContent:'space-between'
+                      display:'grid', gridTemplateColumns:'2fr 1.6fr 1fr 100px',
+                      padding:'7px 14px', cursor:'pointer',
+                      borderBottom:'1px solid #eef2f7',
+                      borderLeft: isSelected ? '3px solid #1F4E79' : '3px solid transparent',
+                      background: rowBg, alignItems:'center', transition:'background 0.1s'
                     }
                   },
-                    React.createElement('span', null, region === 'No Region' ? '— Unassigned —' : region),
-                    React.createElement('span', {style:{fontWeight:500, color:'#64748b', fontSize:'10px'}},
-                      grouped[region].length + ' co.')
-                  ),
-                  // Company rows as grid columns
-                  ...grouped[region].map(co => {
-                    const rowBg = selected && selected.id === co.id
-                      ? '#dbeafe'
-                      : (globalRowIdx++ % 2 === 0 ? '#ffffff' : '#f8fafc');
-                    return React.createElement('div', {
-                      key: co.id,
-                      onClick: () => selectCompany(co),
-                      style:{
-                        display:'grid', gridTemplateColumns:'2fr 1.6fr 1fr 100px',
-                        padding:'7px 14px 7px 14px', cursor:'pointer',
-                        borderBottom:'1px solid #eef2f7',
-                        borderLeft: selected && selected.id===co.id ? '3px solid #1F4E79' : '3px solid transparent',
-                        background: rowBg,
-                        alignItems:'center', transition:'background 0.1s'
-                      }
+                    React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'4px', minWidth:0, paddingRight:'8px'}},
+                      React.createElement('span', {style:{fontWeight:600, fontSize:'12px', color:'#1e293b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}, co.name),
+                      co.strong_market_partner     ? React.createElement('span', {title:'Strong Market Partner',     style:{fontSize:'11px', flexShrink:0}}, '⭐') : null,
+                      co.large_account_opportunity ? React.createElement('span', {title:'Large Account Opportunity', style:{fontSize:'11px', flexShrink:0}}, '🎯') : null
+                    ),
+                    React.createElement('div', {style:{fontSize:'11px', color:'#475569', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', paddingRight:'8px'}},
+                      co.address || '—'),
+                    React.createElement('div', {style:{fontSize:'11px', color:'#0369a1', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}},
+                      co.region || '—'),
+                    React.createElement('div', {style:{fontSize:'12px', fontWeight:700, color:'#1F4E79', textAlign:'right'}},
+                      fmtQ(amtField ? co[amtField] : co.total_quoted))
+                  );
+                };
+
+                const makeRegionRows = (companies, amtField) => {
+                  const grouped = {};
+                  companies.forEach(co => {
+                    const r = co.region || 'No Region';
+                    if (!grouped[r]) grouped[r] = [];
+                    grouped[r].push(co);
+                  });
+                  Object.values(grouped).forEach(arr =>
+                    arr.sort((a,b) => ((b[amtField]||0) - (a[amtField]||0)))
+                  );
+                  const known = REGION_ORDER.filter(r => grouped[r]);
+                  const other = Object.keys(grouped).filter(r => !REGION_ORDER.includes(r) && r !== 'No Region');
+                  const keys  = [...known, ...other, ...(grouped['No Region'] ? ['No Region'] : [])];
+                  let rowIdx  = 0;
+                  return keys.flatMap(region => [
+                    React.createElement('div', {
+                      key: 'reg-' + amtField + '-' + region,
+                      style:{padding:'4px 14px 4px 24px', fontSize:'10px', fontWeight:700,
+                        color:'#1F4E79', textTransform:'uppercase', letterSpacing:'0.07em',
+                        background:'#dbeafe', borderBottom:'1px solid #bfdbfe',
+                        display:'flex', alignItems:'center', justifyContent:'space-between'}
                     },
-                      // Company name + badges
-                      React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'4px', minWidth:0, paddingRight:'8px'}},
-                        React.createElement('span', {style:{
-                          fontWeight:600, fontSize:'12px', color:'#1e293b',
-                          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'
-                        }}, co.name),
-                        co.strong_market_partner     ? React.createElement('span', {title:'Strong Market Partner',     style:{fontSize:'11px', flexShrink:0}}, '⭐') : null,
-                        co.large_account_opportunity ? React.createElement('span', {title:'Large Account Opportunity', style:{fontSize:'11px', flexShrink:0}}, '🎯') : null
-                      ),
-                      // Address
-                      React.createElement('div', {style:{fontSize:'11px', color:'#475569', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', paddingRight:'8px'}},
-                        co.address || '—'
-                      ),
-                      // Region
-                      React.createElement('div', {style:{fontSize:'11px', color:'#0369a1', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}},
-                        co.region || '—'
-                      ),
-                      // Total quoted
-                      React.createElement('div', {style:{fontSize:'12px', fontWeight:700, color:'#1F4E79', textAlign:'right'}},
-                        fmtQ(co.total_quoted)
-                      )
-                    );
-                  })
-                ]);
+                      React.createElement('span', null, region === 'No Region' ? '— Unassigned —' : region),
+                      React.createElement('span', {style:{fontWeight:500, color:'#64748b'}}, grouped[region].length + ' co.')
+                    ),
+                    ...grouped[region].map(co => makeCompanyRow(co, amtField, rowIdx++))
+                  ]);
+                };
+
+                const rows = [];
+                PRODUCT_LINES.forEach(pl => {
+                  const plCos = companies.filter(co => (co[pl.field] || 0) > 0);
+                  if (!plCos.length) return;
+                  // Product line header
+                  rows.push(React.createElement('div', {
+                    key: 'pl-' + pl.key,
+                    style:{padding:'6px 14px', fontSize:'11px', fontWeight:800,
+                      color:'#fff', textTransform:'uppercase', letterSpacing:'0.1em',
+                      background: pl.bg, borderBottom:'2px solid rgba(255,255,255,0.15)',
+                      display:'flex', alignItems:'center', justifyContent:'space-between'}
+                  },
+                    React.createElement('span', null, pl.label),
+                    React.createElement('span', {style:{fontWeight:500, fontSize:'10px', opacity:0.8}}, plCos.length + ' accounts')
+                  ));
+                  rows.push(...makeRegionRows(plCos, pl.field));
+                });
+
+                // Companies with no quotes in any line
+                const noQuotes = companies.filter(co => !co.total_quoted || co.total_quoted === 0);
+                if (noQuotes.length) {
+                  rows.push(React.createElement('div', {
+                    key: 'pl-none',
+                    style:{padding:'6px 14px', fontSize:'11px', fontWeight:800,
+                      color:'#fff', textTransform:'uppercase', letterSpacing:'0.1em',
+                      background:'#64748b', borderBottom:'2px solid rgba(255,255,255,0.15)',
+                      display:'flex', alignItems:'center', justifyContent:'space-between'}
+                  },
+                    React.createElement('span', null, 'No Quotes Linked'),
+                    React.createElement('span', {style:{fontWeight:500, fontSize:'10px', opacity:0.8}}, noQuotes.length + ' accounts')
+                  ));
+                  noQuotes.sort((a,b) => a.name.localeCompare(b.name));
+                  noQuotes.forEach((co, i) => rows.push(makeCompanyRow(co, null, i)));
+                }
+
+                return rows;
               })()
       )
     ),
