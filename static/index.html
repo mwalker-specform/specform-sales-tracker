@@ -3529,6 +3529,15 @@ function App() {
     return () => document.removeEventListener('mousedown', close);
   }, [showUserMenu]);
 
+  // ── Heartbeat: detect if admin deactivates this account (every 30s) ──────────
+  React.useEffect(() => {
+    if (!user) return;
+    const hb = setInterval(() => {
+      apiFetch('/api/auth/me').catch(() => {}); // 401 handler in apiFetch reloads page
+    }, 30_000);
+    return () => clearInterval(hb);
+  }, [user]);
+
   // ── Inactivity timer: auto-logout after 8 hours of no activity ──────────────
   React.useEffect(() => {
     if (!user) return;
