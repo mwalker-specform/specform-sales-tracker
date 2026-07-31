@@ -43,7 +43,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 from jose import JWTError, jwt
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -59,7 +59,15 @@ STATIC   = os.path.join(BASE_DIR, "static")
 JWT_SECRET      = os.environ.get('JWT_SECRET', 'specform-salespartner-change-in-production')
 JWT_ALGORITHM   = 'HS256'
 JWT_EXPIRE_DAYS = 60
-pwd_ctx         = CryptContext(schemes=['bcrypt'], deprecated='auto')
+
+def _hash_pw(password: str) -> str:
+    return _bcrypt.hashpw(password.encode('utf-8'), _bcrypt.gensalt()).decode('utf-8')
+
+def _verify_pw(password: str, hashed: str) -> bool:
+    try:
+        return _bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    except Exception:
+        return False
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 @contextmanager
@@ -2107,7 +2115,7 @@ def init_users_db():
             try:
                 con.execute(
                     "INSERT INTO users (email, pwd_hash, is_admin) VALUES (?,?,?)",
-                    (email, pwd_ctx.hash(DEFAULT_PASSWORD), 1 if is_admin else 0)
+                    (email, _hash_pw(DEFAULT_PASSWORD), 1 if is_admin else 0)
                 )
             except Exception:
                 pass  # Already exists
@@ -2928,13 +2936,13 @@ def debug_users_check(secret: str = Query('')):
                               for r in rows]
         except Exception as e:
             info['db_error'] = str(e)
-    # Test passlib separately
+    # Test bcrypt directly
     try:
-        h = pwd_ctx.hash('test')
-        info['passlib_hash_ok'] = True
-        info['passlib_verify_ok'] = pwd_ctx.verify('test', h)
+        h = _hash_pw('test')
+        info['bcrypt_hash_ok'] = True
+        info['bcrypt_verify_ok'] = _verify_pw('test', h)
     except Exception as e:
-        info['passlib_error'] = str(e)
+        info['bcrypt_error'] = str(e)
     return info
 
 class LoginIn(BaseModel):
@@ -2962,7 +2970,7 @@ def login(body: LoginIn):
         user = con.execute(
             "SELECT * FROM users WHERE LOWER(email)=? AND is_active=1", (email,)
         ).fetchone()
-    if not user or not pwd_ctx.verify(body.password, user['pwd_hash']):
+    if not user or not _verify_pw(body.password, user['pwd_hash']):
         raise HTTPException(401, 'Invalid email or password')
     token = jwt.encode(
         {
@@ -2998,7 +3006,7 @@ def admin_add_user(request: Request, body: UserIn):
         try:
             con.execute(
                 "INSERT INTO users (email, pwd_hash, is_admin) VALUES (?,?,?)",
-                (body.email.strip().lower(), pwd_ctx.hash(body.password), body.is_admin or 0)
+                (body.email.strip().lower(), _hash_pw(body.password), body.is_admin or 0)
             )
         except Exception:
             raise HTTPException(409, 'An account with that email already exists')
@@ -3016,7 +3024,7 @@ def admin_update_user(user_id: int, request: Request, body: UserUpdateIn):
             con.execute("UPDATE users SET is_admin=? WHERE id=?", (body.is_admin, user_id))
         if body.password:
             con.execute("UPDATE users SET pwd_hash=? WHERE id=?",
-                        (pwd_ctx.hash(body.password), user_id))
+                        (_hash_pw(body.password), user_id))
     return {'ok': True}
 
 @app.delete('/api/admin/users/{user_id}')
