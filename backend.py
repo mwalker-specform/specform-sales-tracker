@@ -2912,6 +2912,30 @@ def company_quotes_list(company_id: int):
     return results
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
+
+# TEMPORARY DEBUG — remove after diagnosis
+@app.get('/api/debug/users-check')
+def debug_users_check(secret: str = Query('')):
+    if secret != 'specform-debug-2026':
+        raise HTTPException(403, 'Forbidden')
+    with get_db() as con:
+        try:
+            rows = con.execute("SELECT id, email, is_admin, is_active, pwd_hash FROM users").fetchall()
+        except Exception as e:
+            return {'error': str(e), 'users': []}
+        result = []
+        for r in rows:
+            verifies = False
+            try:
+                verifies = pwd_ctx.verify('Specform2026!', r['pwd_hash'])
+            except Exception as e2:
+                verifies = f'error:{e2}'
+            result.append({'id': r['id'], 'email': r['email'], 'is_admin': r['is_admin'],
+                           'is_active': r['is_active'], 'verifies_default_pw': verifies})
+        test_hash = pwd_ctx.hash('Specform2026!')
+        return {'user_count': len(result), 'users': result,
+                'test_hash_round_trip': pwd_ctx.verify('Specform2026!', test_hash)}
+
 class LoginIn(BaseModel):
     email:    str
     password: str
