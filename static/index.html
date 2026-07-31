@@ -3483,6 +3483,7 @@ function App() {
   const [authChecked,  setAuthChecked]  = useState(false);
   const [splashFading, setSplashFading] = useState(false);
   const [splashGone,   setSplashGone]   = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   React.useEffect(() => {
     const token = sessionStorage.getItem('auth_token');
@@ -3552,7 +3553,6 @@ function App() {
   const [tab, setTab]             = useState('sales');
   const [modal, setModal]         = useState(null);
   const [showChgPw, setShowChgPw] = useState(false);
-  const [showUserMenu, setShowUserMenu] = useState(false);
   const [modalCfg, setModalCfg] = useState(RMAX_CFG);
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
