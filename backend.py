@@ -2625,6 +2625,33 @@ def company_quote_stats(company_id: int, period: str = Query("all")):
         "period":       period,
     }
 
+@app.get("/api/companies/{company_id}/quotes")
+def company_quotes_list(company_id: int):
+    """All quotes linked to this company across all 3 product lines."""
+    tables = [
+        ("quotes",            "RMAX",       "deleted"),
+        ("hydrotech_quotes",  "Hydrotech",  "deleted"),
+        ("glassworks_quotes", "Glassworks", "deleted"),
+    ]
+    results = []
+    with get_db() as con:
+        for table, source, del_col in tables:
+            cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+            if "company_id" not in cols:
+                continue
+            where_del = f"AND ({del_col} IS NULL OR {del_col}=0)" if del_col in cols else ""
+            rows = con.execute(
+                f"SELECT id, date_received, job_name, subject, customer, status, amount, region "
+                f"FROM {table} WHERE company_id=? {where_del} ORDER BY date_received DESC",
+                (company_id,)
+            ).fetchall()
+            for r in rows:
+                d = dict(r)
+                d["source"] = source
+                results.append(d)
+    results.sort(key=lambda r: r.get("date_received") or "", reverse=True)
+    return results
+
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
