@@ -94,7 +94,8 @@ def init_db():
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
                                  ('region',            'TEXT'),
-                                 ('deleted',           'INTEGER DEFAULT 0')]:
+                                 ('deleted',           'INTEGER DEFAULT 0'),
+                                 ('company_id',        'INTEGER')]:
             try:
                 con.execute(f"ALTER TABLE quotes ADD COLUMN {col} {definition}")
             except Exception:
@@ -123,6 +124,7 @@ class QuoteIn(BaseModel):
     region:             Optional[str] = None
     add_to_salesforce:  Optional[int] = 0
     completed:          Optional[int] = 0
+    company_id:         Optional[int] = None
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="RMAX Quote Tracker")
@@ -202,13 +204,13 @@ def create_quote(q: QuoteIn):
         cur = con.execute("""
         INSERT INTO quotes (status,date_received,date_quoted,sent_to,subject,job_name,
             customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
-            region,add_to_salesforce,completed)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            region,add_to_salesforce,completed,company_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed))
+              q.region,q.add_to_salesforce,q.completed,q.company_id))
         return {"id": cur.lastrowid}
 
 @app.put("/api/quotes/{quote_id}")
@@ -221,13 +223,13 @@ def update_quote(quote_id: int, q: QuoteIn):
         UPDATE quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
             job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
             close_date=?,est_freight=?,lead_time=?,notes=?,
-            region=?,add_to_salesforce=?,completed=?,updated_at=datetime('now')
+            region=?,add_to_salesforce=?,completed=?,company_id=?,updated_at=datetime('now')
         WHERE id=?
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed,quote_id))
+              q.region,q.add_to_salesforce,q.completed,q.company_id,quote_id))
         return {"ok": True}
 
 @app.delete("/api/quotes/{quote_id}")
@@ -528,7 +530,8 @@ def sync_from_outlook():
                     (subject, date_received)
                 ).fetchone()
                 if exists:
-                    if sent_to and exists["sent_to"] != sent_to:
+                    # Only fill in sent_to if blank — never overwrite a user-edited value
+                    if sent_to and not exists["sent_to"]:
                         con.execute("UPDATE quotes SET sent_to=? WHERE id=?",
                                     (sent_to, exists["id"]))
                         updated += 1
@@ -699,6 +702,18 @@ def dashboard():
             ORDER BY total DESC
         """).fetchall()
 
+        # By region
+        by_reg = con.execute("""
+            SELECT COALESCE(NULLIF(TRIM(region),''),'(No Region)') as region,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
+            FROM quotes
+            WHERE (deleted IS NULL OR deleted=0)
+            GROUP BY region
+            ORDER BY total DESC
+        """).fetchall()
+
         # By month — parse dates in Python to handle M/D/YYYY, "Jul 13, 2026", etc.
         cutoff = datetime.now().replace(day=1) - timedelta(days=335)  # ~11 months ago
         raw_quotes = con.execute(
@@ -719,6 +734,32 @@ def dashboard():
             if st == 'Lost':   month_acc[ym]['lost']   += amt; month_acc[ym]['lost_count']   += 1
         by_month = [{'month': k, **v} for k, v in sorted(month_acc.items())]
 
+        # By close month — for 12-Month Rolling Projected Sales chart
+        raw_close = con.execute(
+            "SELECT close_date, status, amount FROM quotes "
+            "WHERE (deleted IS NULL OR deleted=0) AND close_date IS NOT NULL AND close_date != ''"
+        ).fetchall()
+        close_acc = defaultdict(lambda: dict(total=0.0, won=0.0, verbal=0.0, open=0.0))
+        for row in raw_close:
+            dt = parse_date(row["close_date"])
+            if not dt:
+                continue
+            ym  = dt.strftime('%Y-%m')
+            amt = float(row["amount"] or 0)
+            st  = (row["status"] or '').strip()
+            if st in ('Lost', 'Duplicate'):
+                continue
+            close_acc[ym]['total'] += amt
+            if st == 'Won':
+                close_acc[ym]['won']    += amt
+            elif st == 'Verbal':
+                close_acc[ym]['verbal'] += amt
+            else:
+                close_acc[ym]['open']   += amt
+        by_close_month = [{'month': k, 'total': round(v['total'], 2), 'won': round(v['won'], 2),
+                           'verbal': round(v['verbal'], 2), 'open': round(v['open'], 2)}
+                          for k, v in sorted(close_acc.items())]
+
         # Status breakdown
         by_status = con.execute("""
             SELECT status, COUNT(*) as count, COALESCE(SUM(amount),0) as amount
@@ -728,6 +769,32 @@ def dashboard():
             ORDER BY amount DESC
         """).fetchall()
 
+        # By region and month — for regional monthly trends chart
+        raw_rq = con.execute(
+            "SELECT date_received, region, amount, status FROM quotes WHERE (deleted IS NULL OR deleted=0) AND date_received IS NOT NULL AND date_received != ''"
+        ).fetchall()
+        rm_acc = {}
+        for row in raw_rq:
+            dt = parse_date(row["date_received"])
+            if not dt:
+                continue
+            ym     = dt.strftime('%Y-%m')
+            region = (row["region"] or '').strip() or '(No Region)'
+            key    = (region, ym)
+            if key not in rm_acc:
+                rm_acc[key] = {'region': region, 'month': ym, 'total': 0.0, 'count': 0, 'won': 0.0, 'verbal': 0.0}
+            amt = float(row["amount"] or 0)
+            rm_acc[key]['total'] += amt
+            rm_acc[key]['count'] += 1
+            st = (row["status"] or '').strip()
+            if st == 'Won':
+                rm_acc[key]['won'] += amt
+            elif st == 'Verbal':
+                rm_acc[key]['verbal'] += amt
+        by_region_month = [{'region': k[0], 'month': k[1], 'total': round(v['total'], 2), 'count': v['count'],
+                            'won': round(v['won'], 2), 'verbal': round(v['verbal'], 2)}
+                           for k, v in sorted(rm_acc.items())]
+
         # Distinct filter options
         locations = [r[0] for r in con.execute(
             "SELECT DISTINCT location FROM quotes WHERE (deleted IS NULL OR deleted=0) AND location IS NOT NULL ORDER BY location"
@@ -736,7 +803,10 @@ def dashboard():
         return {
             "totals": dict(totals),
             "by_location": [dict(r) for r in by_loc],
+            "by_region": [dict(r) for r in by_reg],
+            "by_region_month": by_region_month,
             "by_month": [dict(r) for r in by_month],
+            "by_close_month": by_close_month,
             "by_status": [dict(r) for r in by_status],
             "locations": locations,
         }
@@ -1034,11 +1104,34 @@ def init_hydrotech_db():
                                  ('completed',         'INTEGER DEFAULT 0'),
                                  ('region',            'TEXT'),
                                  ('deleted',           'INTEGER DEFAULT 0'),
-                                 ('pdf_filename',      'TEXT')]:
+                                 ('pdf_filename',      'TEXT'),
+                                 ('company_id',        'INTEGER')]:
             try:
                 con.execute(f"ALTER TABLE hydrotech_quotes ADD COLUMN {col} {definition}")
             except Exception:
                 pass
+        # Multi-PDF table
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS hydrotech_quote_pdfs (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            quote_id     INTEGER NOT NULL,
+            pdf_filename TEXT NOT NULL,
+            uploaded_at  TEXT DEFAULT (datetime('now'))
+        )""")
+        # Migrate any existing single pdf_filename values into the new table
+        existing = con.execute(
+            "SELECT id, pdf_filename FROM hydrotech_quotes WHERE pdf_filename IS NOT NULL AND pdf_filename != ''"
+        ).fetchall()
+        for row in existing:
+            dup = con.execute(
+                "SELECT id FROM hydrotech_quote_pdfs WHERE quote_id=? AND pdf_filename=?",
+                (row["id"], row["pdf_filename"])
+            ).fetchone()
+            if not dup:
+                con.execute(
+                    "INSERT INTO hydrotech_quote_pdfs (quote_id, pdf_filename) VALUES (?,?)",
+                    (row["id"], row["pdf_filename"])
+                )
     # Ensure PDF storage directory exists
     os.makedirs(os.path.join(DATA_DIR, "hydrotech_pdfs"), exist_ok=True)
 
@@ -1063,7 +1156,19 @@ def list_hydrotech_quotes(
             params += [s, s, s, s, s]
         sql += " ORDER BY date_received DESC"
         rows = con.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        quotes = [dict(r) for r in rows]
+        if quotes:
+            ids = [q["id"] for q in quotes]
+            pdf_rows = con.execute(
+                f"SELECT id, quote_id, pdf_filename FROM hydrotech_quote_pdfs WHERE quote_id IN ({','.join('?'*len(ids))}) ORDER BY uploaded_at",
+                ids
+            ).fetchall()
+            pdf_map = {}
+            for pr in pdf_rows:
+                pdf_map.setdefault(pr["quote_id"], []).append({"id": pr["id"], "filename": pr["pdf_filename"]})
+            for q in quotes:
+                q["pdfs"] = pdf_map.get(q["id"], [])
+        return quotes
 
 @app.get("/api/hydrotech-quotes/{quote_id}")
 def get_hydrotech_quote(quote_id: int):
@@ -1071,7 +1176,12 @@ def get_hydrotech_quote(quote_id: int):
         row = con.execute("SELECT * FROM hydrotech_quotes WHERE id=? AND (deleted IS NULL OR deleted=0)", (quote_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Hydrotech quote not found")
-        return dict(row)
+        q = dict(row)
+        pdf_rows = con.execute(
+            "SELECT id, pdf_filename FROM hydrotech_quote_pdfs WHERE quote_id=? ORDER BY uploaded_at", (quote_id,)
+        ).fetchall()
+        q["pdfs"] = [{"id": pr["id"], "filename": pr["pdf_filename"]} for pr in pdf_rows]
+        return q
 
 @app.post("/api/hydrotech-quotes", status_code=201)
 def create_hydrotech_quote(q: QuoteIn):
@@ -1079,12 +1189,12 @@ def create_hydrotech_quote(q: QuoteIn):
         cur = con.execute("""
         INSERT INTO hydrotech_quotes (status,date_received,date_quoted,sent_to,subject,job_name,
             customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
-            region,add_to_salesforce,completed)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            region,add_to_salesforce,completed,company_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (q.status,q.date_received,q.date_quoted,q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               q.close_date,q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed))
+              q.region,q.add_to_salesforce,q.completed,q.company_id))
         return {"id": cur.lastrowid}
 
 @app.put("/api/hydrotech-quotes/{quote_id}")
@@ -1097,12 +1207,12 @@ def update_hydrotech_quote(quote_id: int, q: QuoteIn):
         UPDATE hydrotech_quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
             job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
             close_date=?,est_freight=?,lead_time=?,notes=?,
-            region=?,add_to_salesforce=?,completed=?,updated_at=datetime('now')
+            region=?,add_to_salesforce=?,completed=?,company_id=?,updated_at=datetime('now')
         WHERE id=?
         """, (q.status,q.date_received,q.date_quoted,q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               q.close_date,q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed,quote_id))
+              q.region,q.add_to_salesforce,q.completed,q.company_id,quote_id))
         return {"ok": True}
 
 @app.delete("/api/hydrotech-quotes/{quote_id}")
@@ -1113,7 +1223,7 @@ def delete_hydrotech_quote(quote_id: int):
 
 @app.post("/api/hydrotech-quotes/{quote_id}/upload-pdf")
 async def upload_hydrotech_pdf(quote_id: int, file: UploadFile):
-    """Manually attach a PDF to an existing Hydrotech quote."""
+    """Manually attach a PDF to an existing Hydrotech quote (supports multiple)."""
     os.makedirs(os.path.join(DATA_DIR, "hydrotech_pdfs"), exist_ok=True)
     safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in file.filename)
     pdf_filename = f"{quote_id}_{safe_name}"
@@ -1122,8 +1232,21 @@ async def upload_hydrotech_pdf(quote_id: int, file: UploadFile):
     with open(pdf_path, "wb") as f:
         f.write(contents)
     with get_db() as con:
-        con.execute("UPDATE hydrotech_quotes SET pdf_filename=? WHERE id=?", (pdf_filename, quote_id))
+        con.execute("INSERT INTO hydrotech_quote_pdfs (quote_id, pdf_filename) VALUES (?,?)", (quote_id, pdf_filename))
     return {"ok": True, "pdf_filename": pdf_filename}
+
+@app.delete("/api/hydrotech-pdfs/{pdf_id}")
+def delete_hydrotech_pdf(pdf_id: int):
+    """Delete a single PDF attachment from a Hydrotech quote."""
+    with get_db() as con:
+        row = con.execute("SELECT pdf_filename FROM hydrotech_quote_pdfs WHERE id=?", (pdf_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "PDF not found")
+        pdf_path = os.path.join(DATA_DIR, "hydrotech_pdfs", row["pdf_filename"])
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+        con.execute("DELETE FROM hydrotech_quote_pdfs WHERE id=?", (pdf_id,))
+    return {"ok": True}
 
 @app.get("/api/hydrotech-pdf/{filename}")
 def serve_hydrotech_pdf(filename: str):
@@ -1286,12 +1409,9 @@ def hydrotech_sync():
     inserted = updated = skipped = 0
     with get_db() as con:
         for msg in msgs:
-            to_recipients = msg.get("toRecipients", [])
-            if to_recipients:
-                first_to = to_recipients[0].get("emailAddress", {})
-                sent_to  = (first_to.get("name") or first_to.get("address") or "").strip()
-            else:
-                sent_to  = ""
+            # For Hydrotech, the customer is the *sender* of the incoming quote request
+            from_addr = msg.get("from", {}).get("emailAddress", {})
+            sent_to   = (from_addr.get("address") or from_addr.get("name") or "").strip()
 
             subject       = (msg.get("subject") or "").strip()
             received_raw  = msg.get("receivedDateTime", "")
@@ -1302,7 +1422,8 @@ def hydrotech_sync():
                 (subject, date_received)
             ).fetchone()
             if exists:
-                if sent_to and exists["sent_to"] != sent_to:
+                # Only fill in sent_to if blank — never overwrite a user-edited value
+                if sent_to and not exists["sent_to"]:
                     con.execute("UPDATE hydrotech_quotes SET sent_to=? WHERE id=?",
                                 (sent_to, exists["id"]))
                     updated += 1
@@ -1348,9 +1469,9 @@ def hydrotech_sync():
                                 pdf_path = os.path.join(DATA_DIR, "hydrotech_pdfs", pdf_filename)
                                 with open(pdf_path, "wb") as pf:
                                     pf.write(pdf_bytes)
-                                con.execute("UPDATE hydrotech_quotes SET pdf_filename=? WHERE id=?",
-                                            (pdf_filename, new_id))
-                                break  # save only first PDF
+                                con.execute("INSERT INTO hydrotech_quote_pdfs (quote_id, pdf_filename) VALUES (?,?)",
+                                            (new_id, pdf_filename))
+                                # continue loop to save ALL PDF attachments (not just first)
                 except Exception:
                     pass  # don't fail the import if PDF save fails
 
@@ -1393,7 +1514,8 @@ def init_glassworks_db():
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
                                  ('region',            'TEXT'),
-                                 ('deleted',           'INTEGER DEFAULT 0')]:
+                                 ('deleted',           'INTEGER DEFAULT 0'),
+                                 ('company_id',        'INTEGER')]:
             try:
                 con.execute(f"ALTER TABLE glassworks_quotes ADD COLUMN {col} {definition}")
             except Exception:
@@ -1436,13 +1558,13 @@ def create_glassworks_quote(q: QuoteIn):
         cur = con.execute("""
         INSERT INTO glassworks_quotes (status,date_received,date_quoted,sent_to,subject,job_name,
             customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
-            region,add_to_salesforce,completed)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            region,add_to_salesforce,completed,company_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed))
+              q.region,q.add_to_salesforce,q.completed,q.company_id))
         return {"id": cur.lastrowid}
 
 @app.put("/api/glassworks-quotes/{quote_id}")
@@ -1455,13 +1577,13 @@ def update_glassworks_quote(quote_id: int, q: QuoteIn):
         UPDATE glassworks_quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
             job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
             close_date=?,est_freight=?,lead_time=?,notes=?,
-            region=?,add_to_salesforce=?,completed=?,updated_at=datetime('now')
+            region=?,add_to_salesforce=?,completed=?,company_id=?,updated_at=datetime('now')
         WHERE id=?
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed,quote_id))
+              q.region,q.add_to_salesforce,q.completed,q.company_id,quote_id))
         return {"ok": True}
 
 @app.delete("/api/glassworks-quotes/{quote_id}")
@@ -1630,7 +1752,8 @@ def glassworks_sync():
                 (subject, date_received)
             ).fetchone()
             if exists:
-                if sent_to and exists["sent_to"] != sent_to:
+                # Only fill in sent_to if blank — never overwrite a user-edited value
+                if sent_to and not exists["sent_to"]:
                     con.execute("UPDATE glassworks_quotes SET sent_to=? WHERE id=?",
                                 (sent_to, exists["id"]))
                     updated += 1
@@ -1678,6 +1801,7 @@ def hydrotech_dashboard():
         """).fetchone()
         by_loc = con.execute("""
             SELECT location,
+                COUNT(*) as count,
                 COALESCE(SUM(amount),0) as total,
                 COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
                 COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
@@ -1707,12 +1831,105 @@ def hydrotech_dashboard():
         locations = [r[0] for r in con.execute(
             "SELECT DISTINCT location FROM hydrotech_quotes WHERE location IS NOT NULL ORDER BY location"
         ).fetchall()]
+        raw_close_ht = con.execute(
+            "SELECT close_date, status, amount FROM hydrotech_quotes "
+            "WHERE (deleted IS NULL OR deleted=0) AND close_date IS NOT NULL AND close_date != ''"
+        ).fetchall()
+        from collections import defaultdict as _dd2
+        close_acc_ht = _dd2(lambda: dict(total=0.0, won=0.0, verbal=0.0, open=0.0))
+        for row in raw_close_ht:
+            dt = parse_date(row["close_date"])
+            if not dt: continue
+            ym = dt.strftime('%Y-%m')
+            amt = float(row["amount"] or 0)
+            st = (row["status"] or '').strip()
+            if st in ('Lost', 'Duplicate'): continue
+            close_acc_ht[ym]['total'] += amt
+            if st == 'Won':     close_acc_ht[ym]['won']    += amt
+            elif st == 'Verbal': close_acc_ht[ym]['verbal'] += amt
+            else:                close_acc_ht[ym]['open']   += amt
+        by_close_month_ht = [{'month': k, 'total': round(v['total'], 2), 'won': round(v['won'], 2),
+                               'verbal': round(v['verbal'], 2), 'open': round(v['open'], 2)}
+                              for k, v in sorted(close_acc_ht.items())]
         return {
             "totals": dict(totals),
             "by_location": [dict(r) for r in by_loc],
             "by_month": [dict(r) for r in by_month],
             "by_status": [dict(r) for r in by_status],
             "locations": locations,
+            "by_close_month": by_close_month_ht,
+        }
+
+@app.get("/api/glassworks-dashboard")
+def glassworks_dashboard():
+    with get_db() as con:
+        totals = con.execute("""
+            SELECT
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total_amount,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won_amount,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal_amount,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost_amount
+            FROM glassworks_quotes WHERE (deleted IS NULL OR deleted=0)
+        """).fetchone()
+        by_loc = con.execute("""
+            SELECT location,
+                COUNT(*) as count,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
+            FROM glassworks_quotes WHERE (deleted IS NULL OR deleted=0) AND location IS NOT NULL
+            GROUP BY location ORDER BY total DESC
+        """).fetchall()
+        by_month = con.execute("""
+            SELECT substr(date_received,1,7) as month,
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count
+            FROM glassworks_quotes
+            WHERE (deleted IS NULL OR deleted=0) AND date_received IS NOT NULL AND date_received != ''
+              AND substr(date_received,1,7) >= substr(date('now','-11 months'),1,7)
+            GROUP BY month ORDER BY month
+        """).fetchall()
+        by_status = con.execute("""
+            SELECT status, COUNT(*) as count, COALESCE(SUM(amount),0) as amount
+            FROM glassworks_quotes WHERE (deleted IS NULL OR deleted=0) AND status IS NOT NULL
+            GROUP BY status ORDER BY amount DESC
+        """).fetchall()
+        raw_close_gw = con.execute(
+            "SELECT close_date, status, amount FROM glassworks_quotes "
+            "WHERE (deleted IS NULL OR deleted=0) AND close_date IS NOT NULL AND close_date != ''"
+        ).fetchall()
+        from collections import defaultdict as _dd3
+        close_acc_gw = _dd3(lambda: dict(total=0.0, won=0.0, verbal=0.0, open=0.0))
+        for row in raw_close_gw:
+            dt = parse_date(row["close_date"])
+            if not dt: continue
+            ym = dt.strftime('%Y-%m')
+            amt = float(row["amount"] or 0)
+            st = (row["status"] or '').strip()
+            if st in ('Lost', 'Duplicate'): continue
+            close_acc_gw[ym]['total'] += amt
+            if st == 'Won':      close_acc_gw[ym]['won']    += amt
+            elif st == 'Verbal': close_acc_gw[ym]['verbal'] += amt
+            else:                close_acc_gw[ym]['open']   += amt
+        by_close_month_gw = [{'month': k, 'total': round(v['total'], 2), 'won': round(v['won'], 2),
+                               'verbal': round(v['verbal'], 2), 'open': round(v['open'], 2)}
+                              for k, v in sorted(close_acc_gw.items())]
+        return {
+            "totals": dict(totals),
+            "by_location": [dict(r) for r in by_loc],
+            "by_month": [dict(r) for r in by_month],
+            "by_status": [dict(r) for r in by_status],
+            "by_close_month": by_close_month_gw,
         }
 
 # ── Contacts ─────────────────────────────────────────────────────────────────
@@ -1782,6 +1999,38 @@ def init_contacts_db():
                 con.execute(f"ALTER TABLE contacts ADD COLUMN {col} {defn}")
             except Exception:
                 pass  # Column already exists
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS companies (
+            id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                      TEXT NOT NULL,
+            address                   TEXT,
+            phone                     TEXT,
+            website                   TEXT,
+            region                    TEXT,
+            notes                     TEXT,
+            strong_market_partner     INTEGER DEFAULT 0,
+            large_account_opportunity INTEGER DEFAULT 0,
+            created_at                TEXT DEFAULT (datetime('now')),
+            updated_at                TEXT DEFAULT (datetime('now'))
+        )""")
+        # Migrations for companies columns added after initial deploy
+        for col, defn in [
+            ("strong_market_partner",     "INTEGER DEFAULT 0"),
+            ("large_account_opportunity", "INTEGER DEFAULT 0"),
+            ("region",                    "TEXT"),
+        ]:
+            try:
+                con.execute(f"ALTER TABLE companies ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS company_contacts (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id  INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            contact_id  INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            role        TEXT,
+            UNIQUE(company_id, contact_id)
+        )""")
 
 class ContactIn(BaseModel):
     name:          Optional[str] = None
@@ -1847,49 +2096,78 @@ def delete_contact(contact_id: int):
         con.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
         return {"ok": True}
 
+_EMAIL_RE = _re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
 @app.post("/api/contacts/import-from-quotes")
 def import_contacts_from_quotes():
-    """Scan both quote tables and create contact entries for unique sent_to emails."""
+    """Scan both quote tables and create contact entries for unique customers / sent_to emails."""
     from collections import defaultdict
     with get_db() as con:
         rmax_rows  = con.execute("SELECT DISTINCT sent_to, customer, location FROM quotes WHERE (deleted IS NULL OR deleted=0) AND sent_to IS NOT NULL AND sent_to != ''").fetchall()
         hydro_rows = con.execute("SELECT DISTINCT sent_to, customer, location FROM hydrotech_quotes WHERE sent_to IS NOT NULL AND sent_to != ''").fetchall()
 
-        contact_map = defaultdict(lambda: {"company": "", "location": "", "sources": set()})
-        for row in rmax_rows:
-            e = (row["sent_to"] or "").strip().lower()
-            if e:
-                contact_map[e]["company"]  = contact_map[e]["company"]  or (row["customer"] or "")
-                contact_map[e]["location"] = contact_map[e]["location"] or (row["location"] or "")
-                contact_map[e]["sources"].add("RMAX")
-        for row in hydro_rows:
-            e = (row["sent_to"] or "").strip().lower()
-            if e:
-                contact_map[e]["company"]  = contact_map[e]["company"]  or (row["customer"] or "")
-                contact_map[e]["location"] = contact_map[e]["location"] or (row["location"] or "")
-                contact_map[e]["sources"].add("Hydrotech")
+        # Build a map keyed by email (validated) or company name (as fallback)
+        contact_map = {}  # key -> {"email": str|None, "company": str, "location": str, "sources": set}
 
-        inserted = skipped = 0
-        for email, info in contact_map.items():
+        def _add_row(row, source):
+            raw    = (row["sent_to"] or "").strip()
+            email  = raw.lower() if _EMAIL_RE.match(raw) else None
+            if not email:
+                return  # skip entries with no valid email address
+            company = (row["customer"] or "").strip()
+            location = (row["location"] or "").strip()
+            key = email
+            if key not in contact_map:
+                contact_map[key] = {"email": email, "company": company, "location": location, "sources": set()}
+            else:
+                if email and not contact_map[key]["email"]:
+                    contact_map[key]["email"] = email
+                if company and not contact_map[key]["company"]:
+                    contact_map[key]["company"] = company
+                if location and not contact_map[key]["location"]:
+                    contact_map[key]["location"] = location
+            contact_map[key]["sources"].add(source)
+
+        for row in rmax_rows:  _add_row(row, "RMAX")
+        for row in hydro_rows: _add_row(row, "Hydrotech")
+
+        inserted = updated = skipped = 0
+        for key, info in contact_map.items():
+            email        = info["email"]
+            company      = info["company"]
+            location     = info["location"]
             product_line = "Both" if len(info["sources"]) > 1 else list(info["sources"])[0]
-            existing = con.execute("SELECT id, product_line, manually_edited FROM contacts WHERE email=?", (email,)).fetchone()
+
+            # Dedup by email only — same email = same person; different email = new contact
+            existing = con.execute(
+                "SELECT id, email, company, location, product_line, manually_edited FROM contacts WHERE email=?",
+                (email,)
+            ).fetchone() if email else None
             if existing:
-                # Never touch a contact the user has manually edited
                 if existing["manually_edited"]:
                     skipped += 1
                     continue
-                # Upgrade to Both if now seen in both product lines
+                updates = {}
+                if email    and not existing["email"]:    updates["email"]    = email
+                if company  and not existing["company"]:  updates["company"]  = company
+                if location and not existing["location"]: updates["location"] = location
                 if product_line == "Both" and existing["product_line"] != "Both":
-                    con.execute("UPDATE contacts SET product_line='Both',updated_at=datetime('now') WHERE email=?", (email,))
-                skipped += 1
+                    updates["product_line"] = "Both"
+                if updates:
+                    set_clause = ", ".join(f"{k}=?" for k in updates)
+                    con.execute(f"UPDATE contacts SET {set_clause}, updated_at=datetime('now') WHERE id=?",
+                                list(updates.values()) + [existing["id"]])
+                    updated += 1
+                else:
+                    skipped += 1
             else:
-                con.execute("""
-                INSERT INTO contacts (email,company,location,product_line)
-                VALUES (?,?,?,?)
-                """, (email, info["company"], info["location"], product_line))
+                con.execute(
+                    "INSERT INTO contacts (email, company, location, product_line) VALUES (?,?,?,?)",
+                    (email, company, location, product_line)
+                )
                 inserted += 1
 
-        return {"inserted": inserted, "skipped": skipped, "total": inserted + skipped}
+        return {"inserted": inserted, "updated": updated, "skipped": skipped, "total": inserted + updated + skipped}
 
 @app.get("/api/contacts/fetch-signature/{email:path}")
 def fetch_contact_signature(email: str):
@@ -1976,41 +2254,70 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                 pass
         return None
 
+    def _paginate_messages(url_start):
+        """Fetch up to 1000 messages from a paginated Graph URL."""
+        msgs = []
+        next_url = url_start
+        while next_url and len(msgs) < 1000:
+            try:
+                r = _req.get(next_url, headers=headers, timeout=30)
+                if r.status_code != 200:
+                    break
+                data = r.json()
+                msgs.extend(data.get("value", []))
+                next_url = data.get("@odata.nextLink")
+            except Exception:
+                break
+        return msgs
+
     results = []
     total_created = total_updated = total_skipped = 0
 
     with get_db() as con:
         for folder_name in folder_names:
-            folder_id = _find_folder_id(folder_name)
-            if not folder_id:
-                results.append({"folder": folder_name, "error": "Folder not found in mailbox"})
-                continue
-
             pl = "Hydrotech" if "hydrotech" in folder_name.lower() else "RMAX"
 
-            # Paginate through all messages (up to 1 000)
+            # Collect messages from named folder (if it exists) + Sent Items filtered by subject
             msgs = []
-            next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
-                        f"/mailFolders/{folder_id}/messages"
-                        f"?$select=from,body,subject&$top=100")
-            while next_url and len(msgs) < 1000:
-                try:
-                    r = _req.get(next_url, headers=headers, timeout=30)
-                    if r.status_code != 200:
-                        break
-                    data = r.json()
-                    msgs.extend(data.get("value", []))
-                    next_url = data.get("@odata.nextLink")
-                except Exception:
-                    break
+            folder_id = _find_folder_id(folder_name)
+            if folder_id:
+                msgs = _paginate_messages(
+                    f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                    f"/mailFolders/{folder_id}/messages"
+                    f"?$select=from,body,subject,toRecipients&$top=100"
+                )
+
+            # Also scan Sent Items for emails with this folder name in the subject
+            # (catches quotes that never got moved to the folder)
+            subject_kw = folder_name.replace("'", "''")  # escape single quotes for OData
+            sent_msgs = _paginate_messages(
+                f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                f"/mailFolders/SentItems/messages"
+                f"?$filter=contains(subject,'{subject_kw}')"
+                f"&$select=from,body,subject,toRecipients&$top=100"
+            )
+            # Merge, deduplicating by message id
+            seen_ids = {m.get("id") for m in msgs}
+            for m in sent_msgs:
+                if m.get("id") not in seen_ids:
+                    msgs.append(m)
+                    seen_ids.add(m.get("id"))
+
+            if not msgs:
+                results.append({"folder": folder_name, "error": "No messages found in folder or Sent Items"})
+                continue
 
             created = updated = skipped = 0
             seen = set()
 
             for msg in msgs:
-                sender = msg.get("from", {}).get("emailAddress", {})
-                email  = (sender.get("address") or "").strip().lower()
-                name   = (sender.get("name")    or "").strip()
+                # Quote was sent TO the customer — read toRecipients for their address
+                recipients = msg.get("toRecipients", [])
+                if not recipients:
+                    continue
+                contact_addr = recipients[0].get("emailAddress", {})
+                email = (contact_addr.get("address") or "").strip().lower()
+                name  = (contact_addr.get("name")    or "").strip()
                 if not email or email in seen:
                     continue
                 seen.add(email)
@@ -2022,6 +2329,13 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                 sig_text     = _extract_sig_text(body_text)
                 phone        = _extract_phone(sig_text or body_text)
 
+                # Pull company/location from quotes tables
+                qrow = (con.execute("SELECT customer, location FROM quotes WHERE LOWER(sent_to)=? AND customer!='' LIMIT 1", (email,)).fetchone()
+                        or con.execute("SELECT customer, location FROM hydrotech_quotes WHERE LOWER(sent_to)=? AND customer!='' LIMIT 1", (email,)).fetchone())
+                company  = (qrow["customer"] if qrow else "") or ""
+                location = (qrow["location"] if qrow else "") or ""
+
+                # Dedup by email only — same email = same person; different email = new contact
                 existing = con.execute("SELECT * FROM contacts WHERE email=?", (email,)).fetchone()
                 if existing:
                     # Never touch a contact the user has manually edited
@@ -2029,24 +2343,28 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
                         skipped += 1
                         continue
                     updates = {}
-                    if name  and not existing["name"]:  updates["name"]  = name
-                    if phone and not existing["phone"]: updates["phone"] = phone
+                    if name     and not existing["name"]:     updates["name"]     = name
+                    if phone    and not existing["phone"]:    updates["phone"]    = phone
+                    if company  and not existing["company"]:  updates["company"]  = company
+                    if location and not existing["location"]: updates["location"] = location
+                    # Fill in email if matched by company name and email was blank
+                    if email and not existing["email"]:       updates["email"]    = email
                     # Upgrade product_line to Both if contact now appears in a second line
                     if existing["product_line"] and existing["product_line"] != pl and existing["product_line"] != "Both":
                         updates["product_line"] = "Both"
                     if updates:
                         set_clause = ", ".join(f"{k}=?" for k in updates)
                         con.execute(
-                            f"UPDATE contacts SET {set_clause}, updated_at=datetime('now') WHERE email=?",
-                            list(updates.values()) + [email]
+                            f"UPDATE contacts SET {set_clause}, updated_at=datetime('now') WHERE id=?",
+                            list(updates.values()) + [existing["id"]]
                         )
                         updated += 1
                     else:
                         skipped += 1
                 else:
                     con.execute(
-                        "INSERT INTO contacts (name,email,phone,product_line) VALUES (?,?,?,?)",
-                        (name, email, phone, pl)
+                        "INSERT INTO contacts (name,email,phone,company,location,product_line) VALUES (?,?,?,?,?,?)",
+                        (name, email, phone, company, location, pl)
                     )
                     created += 1
 
@@ -2068,6 +2386,439 @@ def scan_outlook_folders(folders: Optional[str] = Query(None)):
         "total_updated": total_updated,
         "total_skipped": total_skipped,
     }
+
+# ── Company Accounts ──────────────────────────────────────────────────────────
+class CompanyIn(BaseModel):
+    name:                      str
+    address:                   Optional[str] = None
+    phone:                     Optional[str] = None
+    website:                   Optional[str] = None
+    region:                    Optional[str] = None
+    notes:                     Optional[str] = None
+    strong_market_partner:     Optional[int] = 0
+    large_account_opportunity: Optional[int] = 0
+
+@app.get("/api/companies")
+def list_companies(search: Optional[str] = Query(None), region: Optional[str] = Query(None)):
+    with get_db() as con:
+        sql = """
+            SELECT c.*,
+                   COUNT(DISTINCT cc.contact_id) as contact_count,
+                   COALESCE((SELECT SUM(amount) FROM quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS rmax_quoted,
+                   COALESCE((SELECT SUM(amount) FROM hydrotech_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS hydrotech_quoted,
+                   COALESCE((SELECT SUM(amount) FROM glassworks_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS glassworks_quoted,
+                   COALESCE((SELECT SUM(amount) FROM quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0)
+                 + COALESCE((SELECT SUM(amount) FROM hydrotech_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0)
+                 + COALESCE((SELECT SUM(amount) FROM glassworks_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0)
+                   AS total_quoted
+            FROM companies c
+            LEFT JOIN company_contacts cc ON cc.company_id = c.id
+            WHERE 1=1
+        """
+        params = []
+        if search:
+            sql += " AND (c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ?)"
+            s = f"%{search}%"
+            params += [s, s, s]
+        if region and region != 'All':
+            sql += " AND c.region = ?"
+            params.append(region)
+        sql += " GROUP BY c.id ORDER BY c.name COLLATE NOCASE"
+        return [dict(r) for r in con.execute(sql, params).fetchall()]
+
+@app.post("/api/companies", status_code=201)
+def create_company(c: CompanyIn):
+    with get_db() as con:
+        cur = con.execute(
+            "INSERT INTO companies (name,address,phone,website,region,notes,strong_market_partner,large_account_opportunity) VALUES (?,?,?,?,?,?,?,?)",
+            (c.name, c.address, c.phone, c.website, c.region, c.notes, c.strong_market_partner or 0, c.large_account_opportunity or 0)
+        )
+        return {"id": cur.lastrowid}
+
+@app.put("/api/companies/{company_id}")
+def update_company(company_id: int, c: CompanyIn):
+    with get_db() as con:
+        existing = con.execute("SELECT id FROM companies WHERE id=?", (company_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "Company not found")
+        con.execute("""
+            UPDATE companies SET name=?,address=?,phone=?,website=?,region=?,notes=?,
+                strong_market_partner=?,large_account_opportunity=?,updated_at=datetime('now')
+            WHERE id=?
+        """, (c.name, c.address, c.phone, c.website, c.region, c.notes,
+              c.strong_market_partner or 0, c.large_account_opportunity or 0, company_id))
+        return {"ok": True}
+
+@app.delete("/api/companies/{company_id}")
+def delete_company(company_id: int):
+    with get_db() as con:
+        con.execute("DELETE FROM company_contacts WHERE company_id=?", (company_id,))
+        con.execute("DELETE FROM companies WHERE id=?", (company_id,))
+        return {"ok": True}
+
+@app.post("/api/companies/import-from-quotes")
+def import_companies_from_quotes():
+    """Scan all quote tables and create Company Account entries from unique customer names,
+    carrying over the most-used region from that customer's quotes."""
+    from collections import defaultdict, Counter
+    with get_db() as con:
+        rows = []
+        for table in ("quotes", "hydrotech_quotes", "glassworks_quotes"):
+            try:
+                rs = con.execute(
+                    f"SELECT customer, region FROM {table} "
+                    f"WHERE (deleted IS NULL OR deleted=0) "
+                    f"AND customer IS NOT NULL AND TRIM(customer) != ''"
+                ).fetchall()
+                rows.extend(rs)
+            except Exception:
+                pass
+
+        # Group all regions seen per customer name (case-insensitive key)
+        customer_map = defaultdict(lambda: {"canonical": "", "regions": []})
+        for row in rows:
+            name = (row["customer"] or "").strip()
+            region = (row["region"] or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            if not customer_map[key]["canonical"]:
+                customer_map[key]["canonical"] = name
+            if region:
+                customer_map[key]["regions"].append(region)
+
+        inserted = updated = skipped = 0
+        for key, info in customer_map.items():
+            name = info["canonical"]
+            non_empty = info["regions"]
+            best_region = Counter(non_empty).most_common(1)[0][0] if non_empty else None
+
+            existing = con.execute(
+                "SELECT id, region FROM companies WHERE LOWER(name) = ?", (key,)
+            ).fetchone()
+
+            if existing:
+                if best_region and not existing["region"]:
+                    con.execute(
+                        "UPDATE companies SET region=?, updated_at=datetime('now') WHERE id=?",
+                        (best_region, existing["id"])
+                    )
+                    updated += 1
+                else:
+                    skipped += 1
+            else:
+                con.execute(
+                    "INSERT INTO companies (name, region) VALUES (?, ?)",
+                    (name, best_region)
+                )
+                inserted += 1
+
+        return {"inserted": inserted, "updated": updated, "skipped": skipped,
+                "total": inserted + updated + skipped}
+
+@app.get("/api/companies/{company_id}/contacts")
+def list_company_contacts(company_id: int):
+    with get_db() as con:
+        rows = con.execute("""
+            SELECT ct.*, cc.role, cc.id as link_id
+            FROM contacts ct
+            JOIN company_contacts cc ON cc.contact_id = ct.id
+            WHERE cc.company_id = ?
+            ORDER BY COALESCE(NULLIF(ct.name,''),'zzz')
+        """, (company_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+class CompanyContactIn(BaseModel):
+    contact_id: int
+    role:       Optional[str] = None
+
+@app.post("/api/companies/{company_id}/contacts", status_code=201)
+def add_company_contact(company_id: int, body: CompanyContactIn):
+    with get_db() as con:
+        existing = con.execute("SELECT id FROM companies WHERE id=?", (company_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "Company not found")
+        try:
+            con.execute(
+                "INSERT INTO company_contacts (company_id,contact_id,role) VALUES (?,?,?)",
+                (company_id, body.contact_id, body.role)
+            )
+        except Exception:
+            raise HTTPException(409, "Contact already linked to this company")
+        return {"ok": True}
+
+@app.delete("/api/companies/{company_id}/contacts/{contact_id}")
+def remove_company_contact(company_id: int, contact_id: int):
+    with get_db() as con:
+        con.execute(
+            "DELETE FROM company_contacts WHERE company_id=? AND contact_id=?",
+            (company_id, contact_id)
+        )
+        return {"ok": True}
+
+@app.put("/api/companies/{company_id}/contacts/{contact_id}")
+def update_company_contact_role(company_id: int, contact_id: int, body: CompanyContactIn):
+    with get_db() as con:
+        con.execute(
+            "UPDATE company_contacts SET role=? WHERE company_id=? AND contact_id=?",
+            (body.role, company_id, contact_id)
+        )
+        return {"ok": True}
+
+@app.get("/api/companies/{company_id}/quote-stats")
+def company_quote_stats(company_id: int, period: str = Query("all")):
+    """Sum amount quoted and amount won across all 3 quote tables for a company.
+    period: 'all' | 'ytd' | 'YYYY-MM'
+    """
+    import datetime
+    tables = [
+        ("quotes",           "deleted"),
+        ("hydrotech_quotes", "deleted"),
+        ("glassworks_quotes","deleted"),
+    ]
+    # Build date clause
+    now = datetime.date.today()
+    date_clause = ""
+    date_params: list = []
+    if period == "ytd":
+        date_clause = "AND date_received >= ?"
+        date_params = [f"{now.year}-01-01"]
+    elif len(period) == 7 and period[4] == "-":   # YYYY-MM
+        date_clause = "AND date_received LIKE ?"
+        date_params = [f"{period}%"]
+
+    total_quoted = 0.0
+    total_won    = 0.0
+    quote_count  = 0
+    won_count    = 0
+    with get_db() as con:
+        for table, del_col in tables:
+            cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+            if "company_id" not in cols or "amount" not in cols:
+                continue
+            where_del = f"AND ({del_col} IS NULL OR {del_col}=0)" if del_col in cols else ""
+            has_date  = "date_received" in cols
+            d_clause  = date_clause if has_date else ""
+            params    = [company_id] + (date_params if has_date else [])
+            rows = con.execute(
+                f"SELECT amount, status FROM {table} WHERE company_id=? {where_del} {d_clause}",
+                params
+            ).fetchall()
+            for r in rows:
+                amt = r["amount"] or 0.0
+                total_quoted += amt
+                quote_count  += 1
+                if r["status"] == "Won":
+                    total_won += amt
+                    won_count += 1
+    return {
+        "total_quoted": total_quoted,
+        "total_won":    total_won,
+        "quote_count":  quote_count,
+        "won_count":    won_count,
+        "period":       period,
+    }
+
+@app.get("/api/companies/export")
+def export_companies():
+    """Export company accounts + contacts: product line → region → company (bold) → contacts (sub-rows)."""
+    import io
+    import openpyxl
+    from collections import defaultdict
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from fastapi.responses import StreamingResponse
+
+    thin      = Side(style="thin", color="D1D5DB")
+    BORDER    = Border(left=thin, right=thin, top=thin, bottom=thin)
+    WRAP      = Alignment(wrap_text=True, vertical="top")
+    LEFT      = Alignment(horizontal="left", vertical="center")
+    CTR       = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    INDENTED  = Alignment(horizontal="left", vertical="center", indent=1)
+
+    PL_FILLS = {
+        "RMAX":       PatternFill("solid", fgColor="1F4E79"),
+        "Hydrotech":  PatternFill("solid", fgColor="064E3B"),
+        "Glassworks": PatternFill("solid", fgColor="7C2D12"),
+    }
+    PL_FONT     = Font(bold=True, color="FFFFFF", size=12)
+    REGION_FILL = PatternFill("solid", fgColor="DBEAFE")
+    REGION_FONT = Font(bold=True, color="1E3A5F", size=10)
+    CO_FONT     = Font(bold=True, size=10)
+    CO_ALT_FILL = PatternFill("solid", fgColor="F4F6F8")
+    CT_FONT     = Font(italic=True, size=9, color="475569")
+    CT_FILL     = PatternFill("solid", fgColor="F8FAFC")
+    HDR_FILL    = PatternFill("solid", fgColor="1F4E79")
+    HDR_FONT    = Font(bold=True, color="FFFFFF", size=11)
+    MONEY_FMT   = '#,##0.00'
+    NCOLS       = 10
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Company Accounts"
+
+    # Column header row
+    # Col 5 doubles as "SMP" for company rows and "Role" for contact sub-rows
+    HEADERS = [
+        "Name", "Address / Email", "Phone", "Region",
+        "SMP / Role", "Large Acct Opp",
+        "RMAX Quoted ($)", "Hydrotech Quoted ($)", "Glassworks Quoted ($)", "Total Quoted ($)"
+    ]
+    for col, h in enumerate(HEADERS, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill, cell.font, cell.alignment, cell.border = HDR_FILL, HDR_FONT, CTR, BORDER
+    ws.row_dimensions[1].height = 22
+
+    with get_db() as con:
+        companies = con.execute("""
+            SELECT c.*,
+                   COALESCE((SELECT SUM(amount) FROM quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS rmax_quoted,
+                   COALESCE((SELECT SUM(amount) FROM hydrotech_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS hydrotech_quoted,
+                   COALESCE((SELECT SUM(amount) FROM glassworks_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS glassworks_quoted
+            FROM companies c
+            GROUP BY c.id
+        """).fetchall()
+
+        contacts_rows = con.execute("""
+            SELECT cc.company_id, ct.name, ct.email, ct.phone, cc.role
+            FROM company_contacts cc
+            JOIN contacts ct ON ct.id = cc.contact_id
+            ORDER BY ct.name COLLATE NOCASE
+        """).fetchall()
+
+    contacts_by_co = defaultdict(list)
+    for ct in contacts_rows:
+        contacts_by_co[ct["company_id"]].append(ct)
+
+    PRODUCT_LINES = [
+        ("RMAX",       "rmax_quoted"),
+        ("Hydrotech",  "hydrotech_quoted"),
+        ("Glassworks", "glassworks_quoted"),
+    ]
+
+    cur_row = 2
+
+    for pl_name, pl_field in PRODUCT_LINES:
+        pl_companies = [co for co in companies if (co[pl_field] or 0) > 0]
+        if not pl_companies:
+            continue
+
+        region_map = defaultdict(list)
+        for co in pl_companies:
+            region_map[co["region"] or ""].append(co)
+        regions = sorted(region_map.keys(), key=lambda r: r.lower() if r else "zzz")
+
+        # ── Product line header row ────────────────────────────────────────────
+        pl_fill = PL_FILLS[pl_name]
+        for col in range(1, NCOLS + 1):
+            cell = ws.cell(row=cur_row, column=col, value=pl_name if col == 1 else None)
+            cell.fill, cell.border = pl_fill, BORDER
+            if col == 1:
+                cell.font, cell.alignment = PL_FONT, LEFT
+        ws.row_dimensions[cur_row].height = 22
+        cur_row += 1
+
+        for region in regions:
+            region_cos = sorted(region_map[region], key=lambda c: -(c[pl_field] or 0))
+            region_label = region if region else "(No Region)"
+
+            # ── Region sub-header row ──────────────────────────────────────────
+            for col in range(1, NCOLS + 1):
+                cell = ws.cell(row=cur_row, column=col, value=region_label if col == 1 else None)
+                cell.fill, cell.border = REGION_FILL, BORDER
+                if col == 1:
+                    cell.font, cell.alignment = REGION_FONT, INDENTED
+            ws.row_dimensions[cur_row].height = 18
+            cur_row += 1
+
+            for idx, co in enumerate(region_cos):
+                total = (co["rmax_quoted"] or 0) + (co["hydrotech_quoted"] or 0) + (co["glassworks_quoted"] or 0)
+                co_fill = CO_ALT_FILL if idx % 2 == 1 else PatternFill()
+                co_vals = [
+                    co["name"] or "",
+                    co["address"] or "",
+                    co["phone"] or "",
+                    co["region"] or "",
+                    "Yes" if co["strong_market_partner"] else "No",
+                    "Yes" if co["large_account_opportunity"] else "No",
+                    round(co["rmax_quoted"] or 0, 2),
+                    round(co["hydrotech_quoted"] or 0, 2),
+                    round(co["glassworks_quoted"] or 0, 2),
+                    round(total, 2),
+                ]
+                for col, v in enumerate(co_vals, 1):
+                    cell = ws.cell(row=cur_row, column=col, value=v)
+                    cell.fill, cell.font, cell.border, cell.alignment = co_fill, CO_FONT, BORDER, WRAP
+                    if col in (7, 8, 9, 10):
+                        cell.number_format = MONEY_FMT
+                ws.row_dimensions[cur_row].height = 16
+                cur_row += 1
+
+                # ── Contact sub-rows (immediately below company) ───────────────
+                for ct in contacts_by_co.get(co["id"], []):
+                    ct_vals = [
+                        f"  → {ct['name'] or ''}",  # → Contact Name
+                        ct["email"] or "",
+                        ct["phone"] or "",
+                        "",
+                        ct["role"] or "",
+                        "", "", "", "", "",
+                    ]
+                    for col, v in enumerate(ct_vals, 1):
+                        cell = ws.cell(row=cur_row, column=col, value=v)
+                        cell.fill, cell.font, cell.border, cell.alignment = CT_FILL, CT_FONT, BORDER, WRAP
+                    ws.row_dimensions[cur_row].height = 14
+                    cur_row += 1
+
+    ws.freeze_panes = "A2"
+    col_widths = [30, 35, 15, 15, 18, 14, 16, 18, 18, 16]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="company_accounts.xlsx"'}
+    )
+
+@app.get("/api/companies/{company_id}/quotes")
+def company_quotes_list(company_id: int):
+    """All quotes linked to this company across all 3 product lines."""
+    tables = [
+        ("quotes",            "RMAX",       "deleted"),
+        ("hydrotech_quotes",  "Hydrotech",  "deleted"),
+        ("glassworks_quotes", "Glassworks", "deleted"),
+    ]
+    results = []
+    with get_db() as con:
+        for table, source, del_col in tables:
+            cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+            if "company_id" not in cols:
+                continue
+            where_del = f"AND ({del_col} IS NULL OR {del_col}=0)" if del_col in cols else ""
+            rows = con.execute(
+                f"SELECT id, date_received, job_name, subject, customer, status, amount, region "
+                f"FROM {table} WHERE company_id=? {where_del} ORDER BY date_received DESC",
+                (company_id,)
+            ).fetchall()
+            for r in rows:
+                d = dict(r)
+                d["source"] = source
+                results.append(d)
+    results.sort(key=lambda r: r.get("date_received") or "", reverse=True)
+    return results
 
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
