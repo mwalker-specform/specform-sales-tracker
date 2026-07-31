@@ -154,7 +154,7 @@ app.add_middleware(
 )
 
 # ── Auth middleware ────────────────────────────────────────────────────────────
-_UNPROTECTED = {'/api/auth/login', '/api/debug/users-check'}
+_UNPROTECTED = {'/api/auth/login'}
 
 @app.middleware('http')
 async def auth_middleware(request: Request, call_next):
@@ -2921,29 +2921,6 @@ def company_quotes_list(company_id: int):
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
 
-# TEMPORARY DEBUG — remove after diagnosis
-@app.get('/api/debug/users-check')
-def debug_users_check(secret: str = Query('')):
-    if secret != 'specform-debug-2026':
-        raise HTTPException(403, 'Forbidden')
-    info = {}
-    with get_db() as con:
-        try:
-            rows = con.execute("SELECT id, email, is_admin, is_active, pwd_hash FROM users").fetchall()
-            info['user_count'] = len(rows)
-            info['users'] = [{'id': r['id'], 'email': r['email'], 'is_admin': r['is_admin'],
-                               'is_active': r['is_active'], 'hash_prefix': (r['pwd_hash'] or '')[:20]}
-                              for r in rows]
-        except Exception as e:
-            info['db_error'] = str(e)
-    # Test bcrypt directly
-    try:
-        h = _hash_pw('test')
-        info['bcrypt_hash_ok'] = True
-        info['bcrypt_verify_ok'] = _verify_pw('test', h)
-    except Exception as e:
-        info['bcrypt_error'] = str(e)
-    return info
 
 class LoginIn(BaseModel):
     email:    str
