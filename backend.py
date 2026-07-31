@@ -2627,43 +2627,57 @@ def company_quote_stats(company_id: int, period: str = Query("all")):
 
 @app.get("/api/companies/export")
 def export_companies():
-    """Export all company accounts + linked contacts to Excel."""
+    """Export company accounts + contacts: product line → region → company (bold) → contacts (sub-rows)."""
     import io
     import openpyxl
+    from collections import defaultdict
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
     from fastapi.responses import StreamingResponse
 
-    HEADER_FILL  = PatternFill("solid", fgColor="1F4E79")
-    HEADER_FONT  = Font(bold=True, color="FFFFFF", size=11)
-    ALT_FILL     = PatternFill("solid", fgColor="EFF6FF")
-    BOLD         = Font(bold=True)
-    CENTER       = Alignment(horizontal="center", vertical="center")
-    WRAP         = Alignment(wrap_text=True, vertical="top")
-    thin         = Side(style="thin", color="D1D5DB")
-    BORDER       = Border(left=thin, right=thin, top=thin, bottom=thin)
+    thin      = Side(style="thin", color="D1D5DB")
+    BORDER    = Border(left=thin, right=thin, top=thin, bottom=thin)
+    WRAP      = Alignment(wrap_text=True, vertical="top")
+    LEFT      = Alignment(horizontal="left", vertical="center")
+    CTR       = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    INDENTED  = Alignment(horizontal="left", vertical="center", indent=1)
 
-    def style_header(ws, headers, row=1):
-        for col, h in enumerate(headers, 1):
-            cell = ws.cell(row=row, column=col, value=h)
-            cell.fill, cell.font, cell.alignment, cell.border = HEADER_FILL, HEADER_FONT, CENTER, BORDER
-        ws.row_dimensions[row].height = 20
+    PL_FILLS = {
+        "RMAX":       PatternFill("solid", fgColor="1F4E79"),
+        "Hydrotech":  PatternFill("solid", fgColor="064E3B"),
+        "Glassworks": PatternFill("solid", fgColor="7C2D12"),
+    }
+    PL_FONT     = Font(bold=True, color="FFFFFF", size=12)
+    REGION_FILL = PatternFill("solid", fgColor="DBEAFE")
+    REGION_FONT = Font(bold=True, color="1E3A5F", size=10)
+    CO_FONT     = Font(bold=True, size=10)
+    CO_ALT_FILL = PatternFill("solid", fgColor="F4F6F8")
+    CT_FONT     = Font(italic=True, size=9, color="475569")
+    CT_FILL     = PatternFill("solid", fgColor="F8FAFC")
+    HDR_FILL    = PatternFill("solid", fgColor="1F4E79")
+    HDR_FONT    = Font(bold=True, color="FFFFFF", size=11)
+    MONEY_FMT   = '#,##0.00'
+    NCOLS       = 10
 
-    def autofit(ws, min_w=10, max_w=45):
-        for col in ws.columns:
-            length = max((len(str(c.value or '')) for c in col), default=min_w)
-            ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(length + 2, min_w), max_w)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Company Accounts"
 
-    wb  = openpyxl.Workbook()
-    ws1 = wb.active
-    ws1.title = "Companies"
-    ws2 = wb.create_sheet("Contacts")
+    # Column header row
+    # Col 5 doubles as "SMP" for company rows and "Role" for contact sub-rows
+    HEADERS = [
+        "Name", "Address / Email", "Phone", "Region",
+        "SMP / Role", "Large Acct Opp",
+        "RMAX Quoted ($)", "Hydrotech Quoted ($)", "Glassworks Quoted ($)", "Total Quoted ($)"
+    ]
+    for col, h in enumerate(HEADERS, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill, cell.font, cell.alignment, cell.border = HDR_FILL, HDR_FONT, CTR, BORDER
+    ws.row_dimensions[1].height = 22
 
     with get_db() as con:
-        # ── Companies ──────────────────────────────────────────────────────────
         companies = con.execute("""
             SELECT c.*,
-                   COUNT(DISTINCT cc.contact_id) as contact_count,
                    COALESCE((SELECT SUM(amount) FROM quotes
                              WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS rmax_quoted,
                    COALESCE((SELECT SUM(amount) FROM hydrotech_quotes
@@ -2671,83 +2685,104 @@ def export_companies():
                    COALESCE((SELECT SUM(amount) FROM glassworks_quotes
                              WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS glassworks_quoted
             FROM companies c
-            LEFT JOIN company_contacts cc ON cc.company_id = c.id
             GROUP BY c.id
-            ORDER BY c.region COLLATE NOCASE, c.name COLLATE NOCASE
         """).fetchall()
 
-        co_headers = [
-            "Company Name","Region","Address","Phone","Website",
-            "Strong Market Partner","Large Account Opportunity","Notes",
-            "RMAX Quoted ($)","Hydrotech Quoted ($)","Glassworks Quoted ($)",
-            "Total Quoted ($)","Contact Count",
-        ]
-        style_header(ws1, co_headers)
-        for i, co in enumerate(companies):
-            r = i + 2
-            vals = [
-                co["name"],
-                co["region"] or "",
-                co["address"] or "",
-                co["phone"] or "",
-                co["website"] or "",
-                "Yes" if co["strong_market_partner"] else "No",
-                "Yes" if co["large_account_opportunity"] else "No",
-                co["notes"] or "",
-                round(co["rmax_quoted"] or 0, 2),
-                round(co["hydrotech_quoted"] or 0, 2),
-                round(co["glassworks_quoted"] or 0, 2),
-                round((co["rmax_quoted"] or 0) + (co["hydrotech_quoted"] or 0) + (co["glassworks_quoted"] or 0), 2),
-                co["contact_count"] or 0,
-            ]
-            fill = ALT_FILL if i % 2 == 0 else PatternFill()
-            for col, v in enumerate(vals, 1):
-                cell = ws1.cell(row=r, column=col, value=v)
-                cell.fill, cell.border = fill, BORDER
-                cell.alignment = WRAP
-                if col in (9, 10, 11, 12):
-                    cell.number_format = '#,##0.00'
-
-        # Totals row
-        tr = len(companies) + 2
-        ws1.cell(row=tr, column=1, value="TOTAL").font = BOLD
-        for col in (9, 10, 11, 12):
-            cell = ws1.cell(row=tr, column=col,
-                value=f"=SUM({get_column_letter(col)}2:{get_column_letter(col)}{tr-1})")
-            cell.font, cell.number_format, cell.border = BOLD, '#,##0.00', BORDER
-        ws1.freeze_panes = "A2"
-        autofit(ws1)
-
-        # ── Contacts ───────────────────────────────────────────────────────────
-        contacts = con.execute("""
-            SELECT c2.name AS company_name, c2.region AS company_region,
-                   ct.name, ct.email, ct.phone, ct.company, ct.location,
-                   ct.product_line, cc.role
+        contacts_rows = con.execute("""
+            SELECT cc.company_id, ct.name, ct.email, ct.phone, cc.role
             FROM company_contacts cc
-            JOIN companies c2 ON c2.id = cc.company_id
-            JOIN contacts ct  ON ct.id  = cc.contact_id
-            ORDER BY c2.region COLLATE NOCASE, c2.name COLLATE NOCASE, ct.name COLLATE NOCASE
+            JOIN contacts ct ON ct.id = cc.contact_id
+            ORDER BY ct.name COLLATE NOCASE
         """).fetchall()
 
-        ct_headers = [
-            "Company Account","Region","Contact Name","Email",
-            "Phone","Role","Location","Product Line",
-        ]
-        style_header(ws2, ct_headers)
-        for i, ct in enumerate(contacts):
-            r = i + 2
-            vals = [
-                ct["company_name"], ct["company_region"] or "",
-                ct["name"] or "", ct["email"] or "",
-                ct["phone"] or "", ct["role"] or "",
-                ct["location"] or "", ct["product_line"] or "",
-            ]
-            fill = ALT_FILL if i % 2 == 0 else PatternFill()
-            for col, v in enumerate(vals, 1):
-                cell = ws2.cell(row=r, column=col, value=v)
-                cell.fill, cell.border, cell.alignment = fill, BORDER, WRAP
-        ws2.freeze_panes = "A2"
-        autofit(ws2)
+    contacts_by_co = defaultdict(list)
+    for ct in contacts_rows:
+        contacts_by_co[ct["company_id"]].append(ct)
+
+    PRODUCT_LINES = [
+        ("RMAX",       "rmax_quoted"),
+        ("Hydrotech",  "hydrotech_quoted"),
+        ("Glassworks", "glassworks_quoted"),
+    ]
+
+    cur_row = 2
+
+    for pl_name, pl_field in PRODUCT_LINES:
+        pl_companies = [co for co in companies if (co[pl_field] or 0) > 0]
+        if not pl_companies:
+            continue
+
+        region_map = defaultdict(list)
+        for co in pl_companies:
+            region_map[co["region"] or ""].append(co)
+        regions = sorted(region_map.keys(), key=lambda r: r.lower() if r else "zzz")
+
+        # ── Product line header row ────────────────────────────────────────────
+        pl_fill = PL_FILLS[pl_name]
+        for col in range(1, NCOLS + 1):
+            cell = ws.cell(row=cur_row, column=col, value=pl_name if col == 1 else None)
+            cell.fill, cell.border = pl_fill, BORDER
+            if col == 1:
+                cell.font, cell.alignment = PL_FONT, LEFT
+        ws.row_dimensions[cur_row].height = 22
+        cur_row += 1
+
+        for region in regions:
+            region_cos = sorted(region_map[region], key=lambda c: -(c[pl_field] or 0))
+            region_label = region if region else "(No Region)"
+
+            # ── Region sub-header row ──────────────────────────────────────────
+            for col in range(1, NCOLS + 1):
+                cell = ws.cell(row=cur_row, column=col, value=region_label if col == 1 else None)
+                cell.fill, cell.border = REGION_FILL, BORDER
+                if col == 1:
+                    cell.font, cell.alignment = REGION_FONT, INDENTED
+            ws.row_dimensions[cur_row].height = 18
+            cur_row += 1
+
+            for idx, co in enumerate(region_cos):
+                total = (co["rmax_quoted"] or 0) + (co["hydrotech_quoted"] or 0) + (co["glassworks_quoted"] or 0)
+                co_fill = CO_ALT_FILL if idx % 2 == 1 else PatternFill()
+                co_vals = [
+                    co["name"] or "",
+                    co["address"] or "",
+                    co["phone"] or "",
+                    co["region"] or "",
+                    "Yes" if co["strong_market_partner"] else "No",
+                    "Yes" if co["large_account_opportunity"] else "No",
+                    round(co["rmax_quoted"] or 0, 2),
+                    round(co["hydrotech_quoted"] or 0, 2),
+                    round(co["glassworks_quoted"] or 0, 2),
+                    round(total, 2),
+                ]
+                for col, v in enumerate(co_vals, 1):
+                    cell = ws.cell(row=cur_row, column=col, value=v)
+                    cell.fill, cell.font, cell.border, cell.alignment = co_fill, CO_FONT, BORDER, WRAP
+                    if col in (7, 8, 9, 10):
+                        cell.number_format = MONEY_FMT
+                ws.row_dimensions[cur_row].height = 16
+                cur_row += 1
+
+                # ── Contact sub-rows (immediately below company) ───────────────
+                for ct in contacts_by_co.get(co["id"], []):
+                    ct_vals = [
+                        f"  → {ct['name'] or ''}",  # → Contact Name
+                        ct["email"] or "",
+                        ct["phone"] or "",
+                        "",
+                        ct["role"] or "",
+                        "", "", "", "", "",
+                    ]
+                    for col, v in enumerate(ct_vals, 1):
+                        cell = ws.cell(row=cur_row, column=col, value=v)
+                        cell.fill, cell.font, cell.border, cell.alignment = CT_FILL, CT_FONT, BORDER, WRAP
+                    ws.row_dimensions[cur_row].height = 14
+                    cur_row += 1
+
+    ws.freeze_panes = "A2"
+    col_widths = [30, 35, 15, 15, 18, 14, 16, 18, 18, 16]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
 
     output = io.BytesIO()
     wb.save(output)
