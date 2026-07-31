@@ -106,7 +106,15 @@ const FIELDS = [
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function apiFetch(path, opts={}) {
-  const res = await fetch(API + path, { headers:{'Content-Type':'application/json'}, ...opts });
+  const token = localStorage.getItem('auth_token');
+  const headers = { 'Content-Type':'application/json', ...(opts.headers||{}) };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API + path, { ...opts, headers });
+  if (res.status === 401) {
+    localStorage.removeItem('auth_token');
+    window.location.reload();
+    return;
+  }
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -3027,15 +3035,304 @@ function CompanyAccounts() {
   );
 }
 
+// ── Login form (shown on splash when not authenticated) ───────────────────────
+function LoginForm({ onLogin }) {
+  const [email,    setEmail]    = useState('');
+  const [password, setPassword] = useState('');
+  const [error,    setError]    = useState('');
+  const [loading,  setLoading]  = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ email: email.trim(), password })
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.detail || 'Login failed'); setLoading(false); return; }
+      localStorage.setItem('auth_token', data.token);
+      onLogin(data);
+    } catch(err) {
+      setError('Could not connect to server');
+      setLoading(false);
+    }
+  }
+
+  const inputStyle = {
+    width:'100%', padding:'10px 12px', borderRadius:'8px', boxSizing:'border-box',
+    border:'1px solid rgba(255,255,255,0.25)', background:'rgba(255,255,255,0.12)',
+    color:'#fff', fontSize:'14px', outline:'none'
+  };
+  const labelStyle = { display:'block', color:'#bfdbfe', fontSize:'11px', fontWeight:700,
+    letterSpacing:'0.06em', textTransform:'uppercase', marginBottom:'6px' };
+
+  return React.createElement('form', {
+    onSubmit: handleSubmit,
+    style: {
+      background:'rgba(255,255,255,0.1)', backdropFilter:'blur(12px)',
+      borderRadius:'16px', padding:'28px 32px', width:'min(90vw,360px)',
+      border:'1px solid rgba(255,255,255,0.18)', marginTop:'8px'
+    }
+  },
+    React.createElement('div', {style:{marginBottom:'14px'}},
+      React.createElement('label', {style:labelStyle}, 'Email'),
+      React.createElement('input', {type:'email', value:email, onChange:e=>setEmail(e.target.value),
+        placeholder:'name@specformbc.com', required:true, disabled:loading, style:inputStyle})
+    ),
+    React.createElement('div', {style:{marginBottom:'20px'}},
+      React.createElement('label', {style:labelStyle}, 'Password'),
+      React.createElement('input', {type:'password', value:password, onChange:e=>setPassword(e.target.value),
+        placeholder:'••••••••', required:true, disabled:loading, style:inputStyle})
+    ),
+    error && React.createElement('div', {style:{
+      background:'rgba(239,68,68,0.2)', border:'1px solid rgba(239,68,68,0.35)',
+      color:'#fca5a5', borderRadius:'8px', padding:'9px 12px',
+      fontSize:'13px', marginBottom:'16px', textAlign:'center'
+    }}, error),
+    React.createElement('button', {
+      type:'submit', disabled:loading,
+      style:{
+        width:'100%', padding:'11px', borderRadius:'8px', border:'none',
+        background: loading ? 'rgba(255,255,255,0.2)' : '#fff',
+        color: loading ? '#9ca3af' : '#1F4E79',
+        fontWeight:700, fontSize:'14px', cursor: loading ? 'default' : 'pointer',
+        transition:'all 0.2s'
+      }
+    }, loading ? 'Signing in…' : 'Sign In')
+  );
+}
+
+// ── User management (admin only) ──────────────────────────────────────────────
+function UsersAdmin() {
+  const [users,       setUsers]       = useState([]);
+  const [adding,      setAdding]      = useState(false);
+  const [newEmail,    setNewEmail]    = useState('');
+  const [newPass,     setNewPass]     = useState('');
+  const [newIsAdmin,  setNewIsAdmin]  = useState(false);
+  const [resetId,     setResetId]     = useState(null);
+  const [resetPass,   setResetPass]   = useState('');
+  const [saving,      setSaving]      = useState(false);
+  const [msg,         setMsg]         = useState('');
+
+  function load() {
+    apiFetch('/api/admin/users').then(data => setUsers(data || [])).catch(()=>{});
+  }
+  useEffect(load, []);
+
+  function flash(m) { setMsg(m); setTimeout(()=>setMsg(''), 4000); }
+
+  async function addUser(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await apiFetch('/api/admin/users', {
+        method:'POST',
+        body: JSON.stringify({email:newEmail.trim(), password:newPass, is_admin: newIsAdmin?1:0})
+      });
+      setAdding(false); setNewEmail(''); setNewPass(''); setNewIsAdmin(false);
+      load(); flash('✓ User added');
+    } catch(err) {
+      flash('Error: ' + err.message);
+    }
+    setSaving(false);
+  }
+
+  async function toggleActive(u) {
+    await apiFetch(`/api/admin/users/${u.id}`, {
+      method:'PUT', body: JSON.stringify({is_active: u.is_active ? 0 : 1})
+    }).catch(()=>{});
+    load();
+  }
+
+  async function toggleAdmin(u) {
+    await apiFetch(`/api/admin/users/${u.id}`, {
+      method:'PUT', body: JSON.stringify({is_admin: u.is_admin ? 0 : 1})
+    }).catch(()=>{});
+    load();
+  }
+
+  async function resetPassword(e) {
+    e.preventDefault();
+    if (!resetPass) return;
+    await apiFetch(`/api/admin/users/${resetId}`, {
+      method:'PUT', body: JSON.stringify({password: resetPass})
+    }).catch(()=>{});
+    setResetId(null); setResetPass('');
+    flash('✓ Password updated');
+  }
+
+  async function deleteUser(u) {
+    if (!confirm(`Remove ${u.email}? This cannot be undone.`)) return;
+    await apiFetch(`/api/admin/users/${u.id}`, {method:'DELETE'}).catch(()=>{});
+    load(); flash('✓ User removed');
+  }
+
+  const inputCls = 'border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300';
+
+  return React.createElement('div', {className:'max-w-3xl mx-auto'},
+    React.createElement('div', {className:'flex items-center justify-between mb-6'},
+      React.createElement('h2', {className:'text-xl font-bold text-gray-800'}, '👤 User Management'),
+      React.createElement('button', {
+        onClick:()=>setAdding(true),
+        className:'flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700'
+      }, '+ Add User')
+    ),
+
+    msg && React.createElement('div', {className:'mb-4 p-3 rounded-lg bg-green-50 text-green-700 text-sm font-medium border border-green-200'}, msg),
+
+    // Add user form
+    adding && React.createElement('form', {onSubmit:addUser,
+      className:'mb-6 p-5 bg-blue-50 rounded-xl border border-blue-100'
+    },
+      React.createElement('h3', {className:'font-semibold text-gray-700 mb-4'}, 'New User'),
+      React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3'},
+        React.createElement('div', null,
+          React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, 'Email'),
+          React.createElement('input', {type:'email', value:newEmail, onChange:e=>setNewEmail(e.target.value),
+            required:true, placeholder:'user@specformbc.com', className:inputCls+' w-full'})
+        ),
+        React.createElement('div', null,
+          React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, 'Temporary Password'),
+          React.createElement('input', {type:'text', value:newPass, onChange:e=>setNewPass(e.target.value),
+            required:true, placeholder:'e.g. Specform2026!', className:inputCls+' w-full'})
+        )
+      ),
+      React.createElement('label', {className:'flex items-center gap-2 text-sm text-gray-600 mb-4 cursor-pointer'},
+        React.createElement('input', {type:'checkbox', checked:newIsAdmin, onChange:e=>setNewIsAdmin(e.target.checked)}),
+        'Administrator (can manage users)'
+      ),
+      React.createElement('div', {className:'flex gap-2'},
+        React.createElement('button', {type:'submit', disabled:saving,
+          className:'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50'
+        }, saving ? 'Saving…' : 'Add User'),
+        React.createElement('button', {type:'button', onClick:()=>setAdding(false),
+          className:'bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-50'
+        }, 'Cancel')
+      )
+    ),
+
+    // Reset password modal
+    resetId !== null && React.createElement('div', {
+      style:{position:'fixed',inset:0,zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',
+             background:'rgba(0,0,0,0.4)'}
+    },
+      React.createElement('form', {onSubmit:resetPassword,
+        className:'bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4'
+      },
+        React.createElement('h3', {className:'font-semibold text-gray-800 mb-4'}, 'Reset Password'),
+        React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, 'New Password'),
+        React.createElement('input', {type:'text', value:resetPass, onChange:e=>setResetPass(e.target.value),
+          required:true, placeholder:'New password', className:inputCls+' w-full mb-4', autoFocus:true}),
+        React.createElement('div', {className:'flex gap-2'},
+          React.createElement('button', {type:'submit',
+            className:'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700'
+          }, 'Save'),
+          React.createElement('button', {type:'button', onClick:()=>{setResetId(null);setResetPass('');},
+            className:'bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-50'
+          }, 'Cancel')
+        )
+      )
+    ),
+
+    // Users table
+    React.createElement('div', {className:'bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden'},
+      React.createElement('table', {className:'w-full text-sm'},
+        React.createElement('thead', null,
+          React.createElement('tr', {className:'bg-gray-50 border-b border-gray-100'},
+            React.createElement('th', {className:'text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide'}, 'Email'),
+            React.createElement('th', {className:'text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide'}, 'Role'),
+            React.createElement('th', {className:'text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide'}, 'Status'),
+            React.createElement('th', {className:'text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide'}, 'Actions')
+          )
+        ),
+        React.createElement('tbody', null,
+          users.map(u => React.createElement('tr', {key:u.id, className:'border-b border-gray-50 hover:bg-gray-50'},
+            React.createElement('td', {className:'px-4 py-3 font-medium text-gray-800'}, u.email),
+            React.createElement('td', {className:'px-4 py-3 text-center'},
+              React.createElement('button', {
+                onClick:()=>toggleAdmin(u),
+                className:'text-xs px-2 py-0.5 rounded-full font-semibold ' + (u.is_admin
+                  ? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200')
+              }, u.is_admin ? '★ Admin' : 'User')
+            ),
+            React.createElement('td', {className:'px-4 py-3 text-center'},
+              React.createElement('button', {
+                onClick:()=>toggleActive(u),
+                className:'text-xs px-2 py-0.5 rounded-full font-semibold ' + (u.is_active
+                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                  : 'bg-red-100 text-red-500 hover:bg-red-200')
+              }, u.is_active ? '● Active' : '○ Inactive')
+            ),
+            React.createElement('td', {className:'px-4 py-3 text-right'},
+              React.createElement('div', {className:'flex gap-2 justify-end'},
+                React.createElement('button', {
+                  onClick:()=>{setResetId(u.id);setResetPass('');},
+                  className:'text-xs text-blue-600 hover:underline'
+                }, 'Reset pw'),
+                React.createElement('button', {
+                  onClick:()=>deleteUser(u),
+                  className:'text-xs text-red-500 hover:underline'
+                }, 'Remove')
+              )
+            )
+          ))
+        )
+      )
+    ),
+
+    React.createElement('p', {className:'text-xs text-gray-400 mt-4 text-center'},
+      'Default password for new users: Specform2026! — advise them to contact admin to change it.'
+    )
+  );
+}
+
 // ── App shell ─────────────────────────────────────────────────────────────────
 function App() {
-  const [splashVisible, setSplashVisible] = useState(true);
-  const [splashFading,  setSplashFading]  = useState(false);
+  // ── Auth state ────────────────────────────────────────────────────────────
+  const [user,         setUser]         = useState(null);
+  const [authChecked,  setAuthChecked]  = useState(false);
+  const [splashFading, setSplashFading] = useState(false);
+  const [splashGone,   setSplashGone]   = useState(false);
+
   React.useEffect(() => {
-    const t1 = setTimeout(() => setSplashFading(true),  5000);
-    const t2 = setTimeout(() => setSplashVisible(false), 5800);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    const token = localStorage.getItem('auth_token');
+    if (!token) { setAuthChecked(true); return; }
+    fetch('/api/auth/me', {headers:{'Authorization':'Bearer '+token}})
+      .then(r => r.ok ? r.json() : null)
+      .then(u => {
+        if (u) {
+          setUser(u);
+          // Auto-fade splash after brief display
+          setTimeout(() => setSplashFading(true), 2000);
+          setTimeout(() => setSplashGone(true),   2800);
+        } else {
+          localStorage.removeItem('auth_token');
+        }
+        setAuthChecked(true);
+      })
+      .catch(() => { localStorage.removeItem('auth_token'); setAuthChecked(true); });
   }, []);
+
+  function handleLogin(data) {
+    setUser(data);
+    setSplashFading(false);
+    setSplashGone(false);
+    setTimeout(() => setSplashFading(true), 800);
+    setTimeout(() => setSplashGone(true),   1600);
+  }
+
+  function logout() {
+    localStorage.removeItem('auth_token');
+    setUser(null);
+    setSplashFading(false);
+    setSplashGone(false);
+    setAuthChecked(true);
+  }
   const [tab, setTab]         = useState('sales');
   const [modal, setModal]     = useState(null);
   const [modalCfg, setModalCfg] = useState(RMAX_CFG);
@@ -3083,16 +3380,22 @@ function App() {
   }
 
   return React.createElement('div', {className:'min-h-screen'},
-    // Splash screen
-    splashVisible && React.createElement('div', {className:'splash' + (splashFading ? ' fade-out' : '')},
-      React.createElement('img', {
-        src: '/static/splash-logo.svg',
-        alt: 'SPECFORM',
-        style: {width: 'min(80vw, 600px)', height: 'auto'}
-      })
+    // Splash / Login overlay — always shown until splashGone
+    !splashGone && React.createElement('div', {
+      className: 'splash' + (splashFading ? ' fade-out' : ''),
+      style: { pointerEvents: splashFading ? 'none' : 'auto' }
+    },
+      React.createElement('div', {style:{display:'flex',flexDirection:'column',alignItems:'center',gap:'0'}},
+        React.createElement('img', {
+          src: '/static/splash-logo.svg', alt: 'SPECFORM',
+          style: {width: 'min(80vw, 600px)', height: 'auto', marginBottom: authChecked && !user ? '8px' : '0'}
+        }),
+        // Show login form only when not authenticated
+        authChecked && !user && React.createElement(LoginForm, {onLogin: handleLogin})
+      )
     ),
-    // Header
-    React.createElement('header', {className:'bg-[#1F4E79] text-white shadow'},
+    // Header (hidden until authenticated + splash gone)
+    user && React.createElement('header', {className:'bg-[#1F4E79] text-white shadow'},
       React.createElement('div', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between'},
         React.createElement('div', {className:'flex items-center gap-4'},
           // Specform logo PNG (transparent bg, dark marks → invert to white for dark header)
@@ -3117,13 +3420,28 @@ function App() {
             style: tab === 'companies'
               ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
               : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
-          }, '🏢 Company Accounts')
+          }, '🏢 Company Accounts'),
+          // Admin: Users management
+          user && user.is_admin && React.createElement('button', {
+            onClick: () => setTab('users'),
+            className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+            style: tab === 'users'
+              ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
+              : {background:'rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.7)', border:'1px solid rgba(255,255,255,0.15)'}
+          }, '⚙️ Users'),
+          // Logout
+          React.createElement('button', {
+            onClick: logout,
+            title: user ? user.email : '',
+            className: 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+            style: {background:'rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.7)', border:'1px solid rgba(255,255,255,0.15)'}
+          }, '↪ Sign out')
         )
       )
     ),
 
-    // Nav tabs
-    React.createElement('div', {className:'bg-white border-b shadow-sm'},
+    // Nav tabs (only when authenticated)
+    user && React.createElement('div', {className:'bg-white border-b shadow-sm'},
       React.createElement('div', {className:'tabs-scroll'},
         React.createElement('div', {className:'max-w-7xl mx-auto px-4 sm:px-6 flex gap-2 py-2'},
         React.createElement('button', {
@@ -3157,14 +3475,15 @@ function App() {
       ))
     ),
 
-    // Content
-    React.createElement('main', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-6'},
+    // Content (only when authenticated)
+    user && React.createElement('main', {className:'max-w-7xl mx-auto px-4 sm:px-6 py-6'},
       tab === 'dashboard'           ? React.createElement(Dashboard, {key:'rmax-dash',    cfg: RMAX_CFG})
       : tab === 'hydrotech-dashboard' ? React.createElement(Dashboard, {key:'ht-dash',      cfg: HYDROTECH_CFG})
       : tab === 'glassworks-dashboard'? React.createElement(Dashboard, {key:'gw-dash',      cfg: GLASSWORKS_CFG})
       : tab === 'sales'               ? React.createElement(SalesTab)
       : tab === 'directory'           ? React.createElement(CustomerDirectory, {key:'dir'})
       : tab === 'companies'           ? React.createElement(CompanyAccounts, {key:'companies'})
+      : tab === 'users'               ? React.createElement(UsersAdmin, {key:'users'})
       : tab === 'hydrotech'           ? React.createElement(QuoteList, {
           key: 'hydrotech',
           refresh,
@@ -3197,8 +3516,8 @@ function App() {
         })
     ),
 
-    // Modal
-    modal !== null && React.createElement(QuoteModal, {
+    // Modal (only when authenticated)
+    user && modal !== null && React.createElement(QuoteModal, {
       quote: Object.keys(modal).length === 0 ? null : modal,
       onClose: () => closeModal(false),
       onSave:  () => closeModal(true),
