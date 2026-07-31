@@ -2021,6 +2021,7 @@ function CompanyAccounts() {
   const [allContacts,   setAllContacts]   = useState([]);
   const [pickerOpen,          setPickerOpen]          = useState(false);
   const [pickerSearch,        setPickerSearch]        = useState('');
+  const [quoteStats,          setQuoteStats]          = useState(null);
   const [createContactOpen,   setCreateContactOpen]   = useState(false);
   const [createContactForm,   setCreateContactForm]   = useState({name:'',email:'',phone:'',role:''});
   const [createContactSaving, setCreateContactSaving] = useState(false);
@@ -2043,8 +2044,13 @@ function CompanyAccounts() {
   }
 
   function loadLinked(companyId) {
-    apiFetch(`/api/companies/${companyId}/contacts`)
-      .then(setLinked).catch(() => {});
+    Promise.all([
+      apiFetch(`/api/companies/${companyId}/contacts`),
+      apiFetch(`/api/companies/${companyId}/quote-stats`),
+    ]).then(([contacts, stats]) => {
+      setLinked(contacts);
+      setQuoteStats(stats);
+    }).catch(() => {});
   }
 
   function loadAllContacts() {
@@ -2069,7 +2075,7 @@ function CompanyAccounts() {
     setEditForm(null);
     setLinkSearch('');
     if (co) loadLinked(co.id);
-    else setLinked([]);
+    else { setLinked([]); setQuoteStats(null); }
   }
 
   function flash(m) { setMsg(m); setTimeout(() => setMsg(''), 4000); }
@@ -2455,6 +2461,38 @@ function CompanyAccounts() {
                   }}, '🎯 Large Account Opportunity') : null
                 )
               )
+        ),
+
+        // ── Quote Stats ──
+        quoteStats && React.createElement('div', {style:{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}},
+          React.createElement('div', {style:{
+            background:'#fff', borderRadius:'10px', border:'1px solid #e2e8f0',
+            boxShadow:'0 1px 3px rgba(0,0,0,0.06)', padding:'14px 16px'
+          }},
+            React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}},
+              '📋 Quoted'
+            ),
+            React.createElement('div', {style:{fontSize:'22px', fontWeight:700, color:'#1e293b'}},
+              '$' + (quoteStats.total_quoted || 0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
+            ),
+            React.createElement('div', {style:{fontSize:'12px', color:'#94a3b8', marginTop:'2px'}},
+              `${quoteStats.quote_count} quote${quoteStats.quote_count !== 1 ? 's' : ''}`
+            )
+          ),
+          React.createElement('div', {style:{
+            background:'#f0fdf4', borderRadius:'10px', border:'1px solid #bbf7d0',
+            boxShadow:'0 1px 3px rgba(0,0,0,0.06)', padding:'14px 16px'
+          }},
+            React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#166534', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}},
+              '🏆 Won'
+            ),
+            React.createElement('div', {style:{fontSize:'22px', fontWeight:700, color:'#16a34a'}},
+              '$' + (quoteStats.total_won || 0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
+            ),
+            React.createElement('div', {style:{fontSize:'12px', color:'#4ade80', marginTop:'2px'}},
+              `${quoteStats.won_count} deal${quoteStats.won_count !== 1 ? 's' : ''} won`
+            )
+          )
         ),
 
         // ── Linked Contacts section ──
