@@ -2918,23 +2918,24 @@ def company_quotes_list(company_id: int):
 def debug_users_check(secret: str = Query('')):
     if secret != 'specform-debug-2026':
         raise HTTPException(403, 'Forbidden')
+    info = {}
     with get_db() as con:
         try:
             rows = con.execute("SELECT id, email, is_admin, is_active, pwd_hash FROM users").fetchall()
+            info['user_count'] = len(rows)
+            info['users'] = [{'id': r['id'], 'email': r['email'], 'is_admin': r['is_admin'],
+                               'is_active': r['is_active'], 'hash_prefix': (r['pwd_hash'] or '')[:20]}
+                              for r in rows]
         except Exception as e:
-            return {'error': str(e), 'users': []}
-        result = []
-        for r in rows:
-            verifies = False
-            try:
-                verifies = pwd_ctx.verify('Specform2026!', r['pwd_hash'])
-            except Exception as e2:
-                verifies = f'error:{e2}'
-            result.append({'id': r['id'], 'email': r['email'], 'is_admin': r['is_admin'],
-                           'is_active': r['is_active'], 'verifies_default_pw': verifies})
-        test_hash = pwd_ctx.hash('Specform2026!')
-        return {'user_count': len(result), 'users': result,
-                'test_hash_round_trip': pwd_ctx.verify('Specform2026!', test_hash)}
+            info['db_error'] = str(e)
+    # Test passlib separately
+    try:
+        h = pwd_ctx.hash('test')
+        info['passlib_hash_ok'] = True
+        info['passlib_verify_ok'] = pwd_ctx.verify('test', h)
+    except Exception as e:
+        info['passlib_error'] = str(e)
+    return info
 
 class LoginIn(BaseModel):
     email:    str
