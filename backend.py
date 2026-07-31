@@ -2402,7 +2402,15 @@ class CompanyIn(BaseModel):
 def list_companies(search: Optional[str] = Query(None), region: Optional[str] = Query(None)):
     with get_db() as con:
         sql = """
-            SELECT c.*, COUNT(cc.contact_id) as contact_count
+            SELECT c.*,
+                   COUNT(DISTINCT cc.contact_id) as contact_count,
+                   COALESCE((SELECT SUM(amount) FROM quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0)
+                 + COALESCE((SELECT SUM(amount) FROM hydrotech_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0)
+                 + COALESCE((SELECT SUM(amount) FROM glassworks_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0)
+                   AS total_quoted
             FROM companies c
             LEFT JOIN company_contacts cc ON cc.company_id = c.id
             WHERE 1=1
