@@ -2487,18 +2487,12 @@ function CompanyAccounts() {
             },
               React.createElement('option', {value:'all'}, 'All Time'),
               React.createElement('option', {value:'ytd'}, 'Year to Date'),
-              // Last 12 months
-              (() => {
-                const opts = [];
-                const now = new Date();
-                for (let i = 0; i < 12; i++) {
-                  const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                  const val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-                  const label = d.toLocaleString('default', {month:'long', year:'numeric'});
-                  opts.push(React.createElement('option', {key:val, value:val}, label));
-                }
-                return opts;
-              })()
+              // 2026 months: July through December
+              ['2026-07','2026-08','2026-09','2026-10','2026-11','2026-12'].map(val => {
+                const [y,m] = val.split('-');
+                const label = new Date(+y, +m-1, 1).toLocaleString('default', {month:'long', year:'numeric'});
+                return React.createElement('option', {key:val, value:val}, label);
+              })
             )
           ),
           // Stat boxes
