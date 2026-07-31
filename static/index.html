@@ -124,16 +124,19 @@ async function downloadExport(url) {
   const token = sessionStorage.getItem('auth_token');
   try {
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
-    if (!res.ok) { alert('Export failed — please try again.'); return; }
-    const blob = await res.blob();
-    const cd   = res.headers.get('Content-Disposition') || '';
-    const m    = cd.match(/filename[^;=\n]*=['"]?([^'"\n]+)['"]?/);
-    const name = m ? m[1] : 'export.xlsx';
-    const a    = document.createElement('a');
-    a.href     = URL.createObjectURL(blob);
-    a.download = name;
+    if (!res.ok) { alert('Export failed (' + res.status + ') — please try again.'); return; }
+    const blob   = await res.blob();
+    const cd     = res.headers.get('Content-Disposition') || '';
+    const m      = cd.match(/filename[^;=\n]*=['"]?([^'"\n]+)['"]?/);
+    const name   = m ? m[1] : 'export.xlsx';
+    const objUrl = URL.createObjectURL(blob);
+    const a      = document.createElement('a');
+    a.href       = objUrl;
+    a.download   = name;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(a.href);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
   } catch(e) { alert('Export failed: ' + e.message); }
 }
 
