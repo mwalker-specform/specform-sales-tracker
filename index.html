@@ -3182,6 +3182,7 @@ function UsersAdmin() {
   const [resetPass,   setResetPass]   = useState('');
   const [saving,      setSaving]      = useState(false);
   const [msg,         setMsg]         = useState('');
+  const [welcoming,   setWelcoming]   = useState({});   // {userId: 'sending'|'sent'|'error'}
 
   function load() {
     apiFetch('/api/admin/users').then(data => setUsers(data || [])).catch(()=>{});
@@ -3234,6 +3235,18 @@ function UsersAdmin() {
     if (!confirm(`Remove ${u.email}? This cannot be undone.`)) return;
     await apiFetch(`/api/admin/users/${u.id}`, {method:'DELETE'}).catch(()=>{});
     load(); flash('✓ User removed');
+  }
+
+  async function sendWelcome(u) {
+    setWelcoming(w => ({...w, [u.id]: 'sending'}));
+    try {
+      await apiFetch(`/api/admin/users/${u.id}/send-welcome`, {method:'POST'});
+      setWelcoming(w => ({...w, [u.id]: 'sent'}));
+      flash(`✓ Welcome email sent to ${u.email}`);
+    } catch(err) {
+      setWelcoming(w => ({...w, [u.id]: 'error'}));
+      flash('Email error: ' + err.message);
+    }
   }
 
   const inputCls = 'border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300';
@@ -3334,7 +3347,22 @@ function UsersAdmin() {
               }, u.is_active ? '● Active' : '○ Inactive')
             ),
             React.createElement('td', {className:'px-4 py-3 text-right'},
-              React.createElement('div', {className:'flex gap-2 justify-end'},
+              React.createElement('div', {className:'flex gap-2 justify-end items-center'},
+                (() => {
+                  const ws = welcoming[u.id];
+                  const label = ws === 'sending' ? '…' : ws === 'sent' ? '✓ Sent' : ws === 'error' ? '✗' : '✉ Welcome';
+                  const cls = 'text-xs px-2 py-1 rounded font-medium border ' + (
+                    ws === 'sent'    ? 'bg-green-50 text-green-600 border-green-200' :
+                    ws === 'error'   ? 'bg-red-50 text-red-500 border-red-200' :
+                    ws === 'sending' ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-default' :
+                                       'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
+                  );
+                  return React.createElement('button', {
+                    onClick: ws === 'sending' ? undefined : () => sendWelcome(u),
+                    className: cls,
+                    title: `Send welcome email to ${u.email}`
+                  }, label);
+                })(),
                 React.createElement('button', {
                   onClick:()=>{setResetId(u.id);setResetPass('');},
                   className:'text-xs text-blue-600 hover:underline'

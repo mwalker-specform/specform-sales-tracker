@@ -3028,6 +3028,130 @@ def admin_delete_user(user_id: int, request: Request):
         con.execute("DELETE FROM users WHERE id=?", (user_id,))
     return {'ok': True}
 
+@app.post('/api/admin/users/{user_id}/send-welcome')
+def admin_send_welcome(user_id: int, request: Request):
+    import smtplib, ssl
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    _require_admin(request)
+
+    # Pull SMTP config from environment
+    smtp_host = os.environ.get('SMTP_HOST', 'smtp.office365.com')
+    smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+    smtp_user = os.environ.get('SMTP_USER', '')
+    smtp_pass = os.environ.get('SMTP_PASSWORD', '')
+    from_email = os.environ.get('FROM_EMAIL', smtp_user)
+    app_url    = os.environ.get('APP_URL', 'https://specform-sales-tracker-production.up.railway.app')
+
+    if not smtp_user or not smtp_pass:
+        raise HTTPException(500, 'Email not configured — set SMTP_USER and SMTP_PASSWORD in Railway environment variables')
+
+    with get_db() as con:
+        user = con.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        raise HTTPException(404, 'User not found')
+
+    to_email = user['email']
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:40px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:#1F4E79;padding:32px 40px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.5px;">
+              SPECFORM SalesPartner
+            </h1>
+            <p style="margin:8px 0 0;color:rgba(255,255,255,0.75);font-size:14px;">
+              Your sales intelligence platform
+            </p>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:40px 40px 32px;">
+            <p style="margin:0 0 16px;font-size:16px;color:#374151;line-height:1.6;">
+              Hi there,
+            </p>
+            <p style="margin:0 0 16px;font-size:16px;color:#374151;line-height:1.6;">
+              You've been added to <strong>SPECFORM SalesPartner</strong> — our internal sales tracking
+              platform for RMAX, Hydrotech, and Glassworks quotes.
+            </p>
+            <p style="margin:0 0 16px;font-size:16px;color:#374151;line-height:1.6;">
+              With SalesPartner you can:
+            </p>
+            <ul style="margin:0 0 24px 24px;padding:0;color:#374151;font-size:15px;line-height:1.8;">
+              <li>Track quotes across all product lines in real time</li>
+              <li>View and manage the customer directory</li>
+              <li>Monitor company accounts and key opportunities</li>
+              <li>See overall SPECFORM sales performance</li>
+            </ul>
+            <p style="margin:0 0 28px;font-size:16px;color:#374151;line-height:1.6;">
+              Click the button below to log in with your email address
+              (<strong>{to_email}</strong>). Your temporary password was provided separately —
+              you can change it anytime from the app.
+            </p>
+
+            <!-- CTA button -->
+            <table cellpadding="0" cellspacing="0" style="margin:0 0 32px;">
+              <tr>
+                <td style="background:#1F4E79;border-radius:8px;padding:14px 32px;text-align:center;">
+                  <a href="{app_url}" style="color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;display:inline-block;">
+                    Open SPECFORM SalesPartner →
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0;font-size:13px;color:#9ca3af;">
+              If the button doesn't work, copy this link into your browser:<br>
+              <a href="{app_url}" style="color:#1F4E79;">{app_url}</a>
+            </p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:20px 40px;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#9ca3af;">
+              Specform Building Components &nbsp;|&nbsp; Internal use only
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+"""
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = 'Welcome to SPECFORM SalesPartner'
+    msg['From']    = from_email
+    msg['To']      = to_email
+    msg.attach(MIMEText(html, 'html'))
+
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.ehlo()
+            server.starttls(context=ctx)
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_email, to_email, msg.as_string())
+    except Exception as e:
+        raise HTTPException(500, f'Failed to send email: {e}')
+
+    return {'ok': True, 'sent_to': to_email}
+
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
