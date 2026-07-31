@@ -2625,6 +2625,139 @@ def company_quote_stats(company_id: int, period: str = Query("all")):
         "period":       period,
     }
 
+@app.get("/api/companies/export")
+def export_companies():
+    """Export all company accounts + linked contacts to Excel."""
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from fastapi.responses import StreamingResponse
+
+    HEADER_FILL  = PatternFill("solid", fgColor="1F4E79")
+    HEADER_FONT  = Font(bold=True, color="FFFFFF", size=11)
+    ALT_FILL     = PatternFill("solid", fgColor="EFF6FF")
+    BOLD         = Font(bold=True)
+    CENTER       = Alignment(horizontal="center", vertical="center")
+    WRAP         = Alignment(wrap_text=True, vertical="top")
+    thin         = Side(style="thin", color="D1D5DB")
+    BORDER       = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def style_header(ws, headers, row=1):
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=row, column=col, value=h)
+            cell.fill, cell.font, cell.alignment, cell.border = HEADER_FILL, HEADER_FONT, CENTER, BORDER
+        ws.row_dimensions[row].height = 20
+
+    def autofit(ws, min_w=10, max_w=45):
+        for col in ws.columns:
+            length = max((len(str(c.value or '')) for c in col), default=min_w)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(length + 2, min_w), max_w)
+
+    wb  = openpyxl.Workbook()
+    ws1 = wb.active
+    ws1.title = "Companies"
+    ws2 = wb.create_sheet("Contacts")
+
+    with get_db() as con:
+        # ── Companies ──────────────────────────────────────────────────────────
+        companies = con.execute("""
+            SELECT c.*,
+                   COUNT(DISTINCT cc.contact_id) as contact_count,
+                   COALESCE((SELECT SUM(amount) FROM quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS rmax_quoted,
+                   COALESCE((SELECT SUM(amount) FROM hydrotech_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS hydrotech_quoted,
+                   COALESCE((SELECT SUM(amount) FROM glassworks_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS glassworks_quoted
+            FROM companies c
+            LEFT JOIN company_contacts cc ON cc.company_id = c.id
+            GROUP BY c.id
+            ORDER BY c.region COLLATE NOCASE, c.name COLLATE NOCASE
+        """).fetchall()
+
+        co_headers = [
+            "Company Name","Region","Address","Phone","Website",
+            "Strong Market Partner","Large Account Opportunity","Notes",
+            "RMAX Quoted ($)","Hydrotech Quoted ($)","Glassworks Quoted ($)",
+            "Total Quoted ($)","Contact Count",
+        ]
+        style_header(ws1, co_headers)
+        for i, co in enumerate(companies):
+            r = i + 2
+            vals = [
+                co["name"],
+                co["region"] or "",
+                co["address"] or "",
+                co["phone"] or "",
+                co["website"] or "",
+                "Yes" if co["strong_market_partner"] else "No",
+                "Yes" if co["large_account_opportunity"] else "No",
+                co["notes"] or "",
+                round(co["rmax_quoted"] or 0, 2),
+                round(co["hydrotech_quoted"] or 0, 2),
+                round(co["glassworks_quoted"] or 0, 2),
+                round((co["rmax_quoted"] or 0) + (co["hydrotech_quoted"] or 0) + (co["glassworks_quoted"] or 0), 2),
+                co["contact_count"] or 0,
+            ]
+            fill = ALT_FILL if i % 2 == 0 else PatternFill()
+            for col, v in enumerate(vals, 1):
+                cell = ws1.cell(row=r, column=col, value=v)
+                cell.fill, cell.border = fill, BORDER
+                cell.alignment = WRAP
+                if col in (9, 10, 11, 12):
+                    cell.number_format = '#,##0.00'
+
+        # Totals row
+        tr = len(companies) + 2
+        ws1.cell(row=tr, column=1, value="TOTAL").font = BOLD
+        for col in (9, 10, 11, 12):
+            cell = ws1.cell(row=tr, column=col,
+                value=f"=SUM({get_column_letter(col)}2:{get_column_letter(col)}{tr-1})")
+            cell.font, cell.number_format, cell.border = BOLD, '#,##0.00', BORDER
+        ws1.freeze_panes = "A2"
+        autofit(ws1)
+
+        # ── Contacts ───────────────────────────────────────────────────────────
+        contacts = con.execute("""
+            SELECT c2.name AS company_name, c2.region AS company_region,
+                   ct.name, ct.email, ct.phone, ct.company, ct.location,
+                   ct.product_line, cc.role
+            FROM company_contacts cc
+            JOIN companies c2 ON c2.id = cc.company_id
+            JOIN contacts ct  ON ct.id  = cc.contact_id
+            ORDER BY c2.region COLLATE NOCASE, c2.name COLLATE NOCASE, ct.name COLLATE NOCASE
+        """).fetchall()
+
+        ct_headers = [
+            "Company Account","Region","Contact Name","Email",
+            "Phone","Role","Location","Product Line",
+        ]
+        style_header(ws2, ct_headers)
+        for i, ct in enumerate(contacts):
+            r = i + 2
+            vals = [
+                ct["company_name"], ct["company_region"] or "",
+                ct["name"] or "", ct["email"] or "",
+                ct["phone"] or "", ct["role"] or "",
+                ct["location"] or "", ct["product_line"] or "",
+            ]
+            fill = ALT_FILL if i % 2 == 0 else PatternFill()
+            for col, v in enumerate(vals, 1):
+                cell = ws2.cell(row=r, column=col, value=v)
+                cell.fill, cell.border, cell.alignment = fill, BORDER, WRAP
+        ws2.freeze_panes = "A2"
+        autofit(ws2)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="company_accounts.xlsx"'}
+    )
+
 @app.get("/api/companies/{company_id}/quotes")
 def company_quotes_list(company_id: int):
     """All quotes linked to this company across all 3 product lines."""
