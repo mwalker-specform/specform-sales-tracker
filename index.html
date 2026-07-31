@@ -106,12 +106,12 @@ const FIELDS = [
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function apiFetch(path, opts={}) {
-  const token = localStorage.getItem('auth_token');
+  const token = sessionStorage.getItem('auth_token');
   const headers = { 'Content-Type':'application/json', ...(opts.headers||{}) };
   if (token) headers['Authorization'] = 'Bearer ' + token;
   const res = await fetch(API + path, { ...opts, headers });
   if (res.status === 401) {
-    localStorage.removeItem('auth_token');
+    sessionStorage.removeItem('auth_token');
     window.location.reload();
     return;
   }
@@ -3035,30 +3035,68 @@ function CompanyAccounts() {
   );
 }
 
-// ── Login form (shown on splash when not authenticated) ───────────────────────
+// ── Login / Change-Password form (shown on splash when not authenticated) ─────
 function LoginForm({ onLogin }) {
-  const [email,    setEmail]    = useState('');
-  const [password, setPassword] = useState('');
-  const [error,    setError]    = useState('');
-  const [loading,  setLoading]  = useState(false);
+  const [mode,      setMode]      = useState('signin'); // 'signin' | 'changepass'
 
-  async function handleSubmit(e) {
+  // Sign In state
+  const [email,     setEmail]     = useState('');
+  const [password,  setPassword]  = useState('');
+  const [error,     setError]     = useState('');
+  const [loading,   setLoading]   = useState(false);
+
+  // Change Password state
+  const [cpEmail,   setCpEmail]   = useState('');
+  const [cpCurrent, setCpCurrent] = useState('');
+  const [cpNew,     setCpNew]     = useState('');
+  const [cpConfirm, setCpConfirm] = useState('');
+  const [cpError,   setCpError]   = useState('');
+  const [cpOk,      setCpOk]      = useState(false);
+  const [cpLoading, setCpLoading] = useState(false);
+
+  async function handleSignIn(e) {
     e.preventDefault();
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const res = await fetch('/api/auth/login', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
+        method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ email: email.trim(), password })
       });
       const data = await res.json();
       if (!res.ok) { setError(data.detail || 'Login failed'); setLoading(false); return; }
-      localStorage.setItem('auth_token', data.token);
+      sessionStorage.setItem('auth_token', data.token);
       onLogin(data);
     } catch(err) {
-      setError('Could not connect to server');
-      setLoading(false);
+      setError('Could not connect to server'); setLoading(false);
+    }
+  }
+
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    setCpError('');
+    if (cpNew.length < 8)     { setCpError('New password must be at least 8 characters.'); return; }
+    if (cpNew !== cpConfirm)  { setCpError('New passwords do not match.'); return; }
+    setCpLoading(true);
+    try {
+      // Step 1: verify identity
+      const loginRes = await fetch('/api/auth/login', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ email: cpEmail.trim(), password: cpCurrent })
+      });
+      const loginData = await loginRes.json();
+      if (!loginRes.ok) { setCpError('Current email or password is incorrect.'); setCpLoading(false); return; }
+      // Step 2: change password using the temporary token
+      const chgRes = await fetch('/api/auth/change-password', {
+        method:'POST',
+        headers:{'Content-Type':'application/json', 'Authorization':'Bearer ' + loginData.token},
+        body: JSON.stringify({ current_password: cpCurrent, new_password: cpNew })
+      });
+      if (!chgRes.ok) { const d = await chgRes.json(); setCpError(d.detail || 'Failed to change password.'); setCpLoading(false); return; }
+      setCpOk(true);
+    } catch(err) {
+      setCpError('Could not connect to server.');
+    } finally {
+      setCpLoading(false);
     }
   }
 
@@ -3069,40 +3107,94 @@ function LoginForm({ onLogin }) {
   };
   const labelStyle = { display:'block', color:'#bfdbfe', fontSize:'11px', fontWeight:700,
     letterSpacing:'0.06em', textTransform:'uppercase', marginBottom:'6px' };
+  const errBox = {
+    background:'rgba(239,68,68,0.2)', border:'1px solid rgba(239,68,68,0.35)',
+    color:'#fca5a5', borderRadius:'8px', padding:'9px 12px',
+    fontSize:'13px', marginBottom:'16px', textAlign:'center'
+  };
+  const tabBtn = (active) => ({
+    flex:1, padding:'8px 4px', fontSize:'13px', fontWeight:700, cursor:'pointer',
+    border:'none', borderRadius:'8px', transition:'all 0.2s',
+    background: active ? 'rgba(255,255,255,0.2)' : 'transparent',
+    color: active ? '#fff' : 'rgba(255,255,255,0.55)'
+  });
+  const submitBtn = (busy) => ({
+    width:'100%', padding:'11px', borderRadius:'8px', border:'none',
+    background: busy ? 'rgba(255,255,255,0.2)' : '#fff',
+    color: busy ? '#9ca3af' : '#1F4E79',
+    fontWeight:700, fontSize:'14px', cursor: busy ? 'default' : 'pointer', transition:'all 0.2s'
+  });
 
-  return React.createElement('form', {
-    onSubmit: handleSubmit,
-    style: {
+  return React.createElement('div', {
+    style:{
       background:'rgba(255,255,255,0.1)', backdropFilter:'blur(12px)',
-      borderRadius:'16px', padding:'28px 32px', width:'min(90vw,360px)',
+      borderRadius:'16px', padding:'28px 32px', width:'min(90vw,380px)',
       border:'1px solid rgba(255,255,255,0.18)', marginTop:'8px'
     }
   },
-    React.createElement('div', {style:{marginBottom:'14px'}},
-      React.createElement('label', {style:labelStyle}, 'Email'),
-      React.createElement('input', {type:'email', value:email, onChange:e=>setEmail(e.target.value),
-        placeholder:'name@specformbc.com', required:true, disabled:loading, style:inputStyle})
+    // Tabs
+    React.createElement('div', {style:{display:'flex', gap:'4px', marginBottom:'24px',
+      background:'rgba(255,255,255,0.08)', borderRadius:'10px', padding:'4px'}},
+      React.createElement('button', {type:'button', style:tabBtn(mode==='signin'),
+        onClick:()=>{setMode('signin'); setError(''); setCpOk(false);}}, 'Sign In'),
+      React.createElement('button', {type:'button', style:tabBtn(mode==='changepass'),
+        onClick:()=>{setMode('changepass'); setCpError(''); setCpOk(false);}}, 'Change Password')
     ),
-    React.createElement('div', {style:{marginBottom:'20px'}},
-      React.createElement('label', {style:labelStyle}, 'Password'),
-      React.createElement('input', {type:'password', value:password, onChange:e=>setPassword(e.target.value),
-        placeholder:'••••••••', required:true, disabled:loading, style:inputStyle})
+
+    // Sign In form
+    mode === 'signin' && React.createElement('form', {onSubmit: handleSignIn},
+      React.createElement('div', {style:{marginBottom:'14px'}},
+        React.createElement('label', {style:labelStyle}, 'Email'),
+        React.createElement('input', {type:'email', value:email, onChange:e=>setEmail(e.target.value),
+          placeholder:'name@specformbc.com', required:true, disabled:loading, style:inputStyle})
+      ),
+      React.createElement('div', {style:{marginBottom:'20px'}},
+        React.createElement('label', {style:labelStyle}, 'Password'),
+        React.createElement('input', {type:'password', value:password, onChange:e=>setPassword(e.target.value),
+          placeholder:'••••••••', required:true, disabled:loading, style:inputStyle})
+      ),
+      error && React.createElement('div', {style:errBox}, error),
+      React.createElement('button', {type:'submit', disabled:loading, style:submitBtn(loading)},
+        loading ? 'Signing in…' : 'Sign In')
     ),
-    error && React.createElement('div', {style:{
-      background:'rgba(239,68,68,0.2)', border:'1px solid rgba(239,68,68,0.35)',
-      color:'#fca5a5', borderRadius:'8px', padding:'9px 12px',
-      fontSize:'13px', marginBottom:'16px', textAlign:'center'
-    }}, error),
-    React.createElement('button', {
-      type:'submit', disabled:loading,
-      style:{
-        width:'100%', padding:'11px', borderRadius:'8px', border:'none',
-        background: loading ? 'rgba(255,255,255,0.2)' : '#fff',
-        color: loading ? '#9ca3af' : '#1F4E79',
-        fontWeight:700, fontSize:'14px', cursor: loading ? 'default' : 'pointer',
-        transition:'all 0.2s'
-      }
-    }, loading ? 'Signing in…' : 'Sign In')
+
+    // Change Password form
+    mode === 'changepass' && (
+      cpOk
+        ? React.createElement('div', {style:{textAlign:'center'}},
+            React.createElement('p', {style:{color:'#bbf7d0', fontWeight:700, fontSize:'15px', marginBottom:'12px'}},
+              '✓ Password changed successfully!'),
+            React.createElement('p', {style:{color:'rgba(255,255,255,0.7)', fontSize:'13px', marginBottom:'20px'}},
+              'You can now sign in with your new password.'),
+            React.createElement('button', {type:'button', style:submitBtn(false),
+              onClick:()=>{setCpOk(false); setMode('signin');}}, 'Go to Sign In')
+          )
+        : React.createElement('form', {onSubmit: handleChangePassword},
+            React.createElement('div', {style:{marginBottom:'14px'}},
+              React.createElement('label', {style:labelStyle}, 'Email'),
+              React.createElement('input', {type:'email', value:cpEmail, onChange:e=>setCpEmail(e.target.value),
+                placeholder:'name@specformbc.com', required:true, disabled:cpLoading, style:inputStyle})
+            ),
+            React.createElement('div', {style:{marginBottom:'14px'}},
+              React.createElement('label', {style:labelStyle}, 'Current Password'),
+              React.createElement('input', {type:'password', value:cpCurrent, onChange:e=>setCpCurrent(e.target.value),
+                placeholder:'••••••••', required:true, disabled:cpLoading, style:inputStyle})
+            ),
+            React.createElement('div', {style:{marginBottom:'14px'}},
+              React.createElement('label', {style:labelStyle}, 'New Password'),
+              React.createElement('input', {type:'password', value:cpNew, onChange:e=>setCpNew(e.target.value),
+                placeholder:'Min 8 characters', required:true, disabled:cpLoading, style:inputStyle})
+            ),
+            React.createElement('div', {style:{marginBottom:'20px'}},
+              React.createElement('label', {style:labelStyle}, 'Confirm New Password'),
+              React.createElement('input', {type:'password', value:cpConfirm, onChange:e=>setCpConfirm(e.target.value),
+                placeholder:'••••••••', required:true, disabled:cpLoading, style:inputStyle})
+            ),
+            cpError && React.createElement('div', {style:errBox}, cpError),
+            React.createElement('button', {type:'submit', disabled:cpLoading, style:submitBtn(cpLoading)},
+              cpLoading ? 'Saving…' : 'Change Password')
+          )
+    )
   );
 }
 
@@ -3393,7 +3485,7 @@ function App() {
   const [splashGone,   setSplashGone]   = useState(false);
 
   React.useEffect(() => {
-    const token = localStorage.getItem('auth_token');
+    const token = sessionStorage.getItem('auth_token');
     if (!token) { setAuthChecked(true); return; }
     fetch('/api/auth/me', {headers:{'Authorization':'Bearer '+token}})
       .then(r => r.ok ? r.json() : null)
@@ -3404,12 +3496,42 @@ function App() {
           setTimeout(() => setSplashFading(true), 2000);
           setTimeout(() => setSplashGone(true),   2800);
         } else {
-          localStorage.removeItem('auth_token');
+          sessionStorage.removeItem('auth_token');
         }
         setAuthChecked(true);
       })
-      .catch(() => { localStorage.removeItem('auth_token'); setAuthChecked(true); });
+      .catch(() => { sessionStorage.removeItem('auth_token'); setAuthChecked(true); });
   }, []);
+
+  // ── Close user menu on outside click ─────────────────────────────────────────
+  React.useEffect(() => {
+    if (!showUserMenu) return;
+    const close = () => setShowUserMenu(false);
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [showUserMenu]);
+
+  // ── Inactivity timer: auto-logout after 8 hours of no activity ──────────────
+  React.useEffect(() => {
+    if (!user) return;
+    const LIMIT = 8 * 60 * 60 * 1000; // 8 hours in ms
+    const mark = () => sessionStorage.setItem('last_activity', Date.now().toString());
+    mark();
+    const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach(ev => window.addEventListener(ev, mark, { passive: true }));
+    const timer = setInterval(() => {
+      const last = parseInt(sessionStorage.getItem('last_activity') || '0', 10);
+      if (Date.now() - last > LIMIT) {
+        sessionStorage.removeItem('auth_token');
+        sessionStorage.removeItem('last_activity');
+        setUser(null); setSplashFading(false); setSplashGone(false); setAuthChecked(true);
+      }
+    }, 60_000);
+    return () => {
+      events.forEach(ev => window.removeEventListener(ev, mark));
+      clearInterval(timer);
+    };
+  }, [user]);
 
   function handleLogin(data) {
     setUser(data);
@@ -3420,15 +3542,17 @@ function App() {
   }
 
   function logout() {
-    localStorage.removeItem('auth_token');
+    sessionStorage.removeItem('auth_token');
+    sessionStorage.removeItem('last_activity');
     setUser(null);
     setSplashFading(false);
     setSplashGone(false);
     setAuthChecked(true);
   }
-  const [tab, setTab]         = useState('sales');
-  const [modal, setModal]     = useState(null);
+  const [tab, setTab]             = useState('sales');
+  const [modal, setModal]         = useState(null);
   const [showChgPw, setShowChgPw] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [modalCfg, setModalCfg] = useState(RMAX_CFG);
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -3523,20 +3647,34 @@ function App() {
               ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
               : {background:'rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.7)', border:'1px solid rgba(255,255,255,0.15)'}
           }, '⚙️ Users'),
-          // Change password (all users)
-          React.createElement('button', {
-            onClick: () => setShowChgPw(true),
-            title: 'Change your password',
-            className: 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
-            style: {background:'rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.7)', border:'1px solid rgba(255,255,255,0.15)'}
-          }, '🔑 Password'),
-          // Logout
-          React.createElement('button', {
-            onClick: logout,
-            title: user ? user.email : '',
-            className: 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
-            style: {background:'rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.7)', border:'1px solid rgba(255,255,255,0.15)'}
-          }, '↪ Sign out')
+          // User menu dropdown
+          React.createElement('div', {style:{position:'relative'}},
+            React.createElement('button', {
+              onClick: () => setShowUserMenu(m => !m),
+              className: 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+              style: {background:'rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
+            }, (user ? user.email.split('@')[0] : '') + ' ▾'),
+            showUserMenu && React.createElement('div', {
+              onMouseDown: e => e.stopPropagation(),
+              style:{position:'absolute', right:0, top:'calc(100% + 6px)', background:'#fff',
+                borderRadius:'10px', boxShadow:'0 4px 20px rgba(0,0,0,0.18)', minWidth:'200px',
+                zIndex:500, overflow:'hidden'}
+            },
+              React.createElement('div', {style:{padding:'8px 14px 6px', fontSize:'11px', color:'#9ca3af', fontWeight:600, borderBottom:'1px solid #f3f4f6'}},
+                user ? user.email : ''),
+              React.createElement('button', {
+                onClick: () => { setShowChgPw(true); setShowUserMenu(false); },
+                style:{display:'block', width:'100%', textAlign:'left', padding:'10px 14px',
+                  fontSize:'13px', fontWeight:600, color:'#374151', background:'none', border:'none', cursor:'pointer'}
+              }, '🔑 Change Password'),
+              React.createElement('button', {
+                onClick: () => { logout(); setShowUserMenu(false); },
+                style:{display:'block', width:'100%', textAlign:'left', padding:'10px 14px',
+                  fontSize:'13px', fontWeight:600, color:'#dc2626', background:'none', border:'none',
+                  cursor:'pointer', borderTop:'1px solid #f3f4f6'}
+              }, '↪ Sign Out')
+            )
+          )
         )
       )
     ),
