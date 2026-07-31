@@ -1022,7 +1022,10 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                             apiFetch(`${quotesBase}/${q.id}`, {method:'PUT', body:JSON.stringify({...q, completed: e.target.checked?1:0})}).then(()=>load(true));
                           }
                         }),
-                        'Completed'
+                        'Completed',
+                        q.completed && q.completed_date && React.createElement('span', {
+                          style:{marginLeft:'4px', color:'#6b7280', fontWeight:400}
+                        }, q.completed_date)
                       )
                     )
                   ),

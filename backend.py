@@ -5,7 +5,7 @@ Run: uvicorn backend:app --reload --port 8000
 """
 import os, sqlite3, json, glob as _glob, shutil, tempfile, io, time
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from contextlib import contextmanager
 from typing import Optional
 
@@ -93,6 +93,7 @@ def init_db():
         # Add columns to existing databases that predate this schema
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
+                                 ('completed_date',    'TEXT'),
                                  ('region',            'TEXT'),
                                  ('deleted',           'INTEGER DEFAULT 0'),
                                  ('company_id',        'INTEGER')]:
@@ -216,20 +217,26 @@ def create_quote(q: QuoteIn):
 @app.put("/api/quotes/{quote_id}")
 def update_quote(quote_id: int, q: QuoteIn):
     with get_db() as con:
-        existing = con.execute("SELECT id FROM quotes WHERE id=?", (quote_id,)).fetchone()
+        existing = con.execute("SELECT completed, completed_date FROM quotes WHERE id=?", (quote_id,)).fetchone()
         if not existing:
             raise HTTPException(404, "Quote not found")
+        if q.completed and not existing['completed_date']:
+            completed_date = date.today().strftime('%Y-%m-%d')
+        elif not q.completed:
+            completed_date = None
+        else:
+            completed_date = existing['completed_date']
         con.execute("""
         UPDATE quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
             job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
             close_date=?,est_freight=?,lead_time=?,notes=?,
-            region=?,add_to_salesforce=?,completed=?,company_id=?,updated_at=datetime('now')
+            region=?,add_to_salesforce=?,completed=?,completed_date=?,company_id=?,updated_at=datetime('now')
         WHERE id=?
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed,q.company_id,quote_id))
+              q.region,q.add_to_salesforce,q.completed,completed_date,q.company_id,quote_id))
         return {"ok": True}
 
 @app.delete("/api/quotes/{quote_id}")
@@ -1102,6 +1109,7 @@ def init_hydrotech_db():
         )""")
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
+                                 ('completed_date',    'TEXT'),
                                  ('region',            'TEXT'),
                                  ('deleted',           'INTEGER DEFAULT 0'),
                                  ('pdf_filename',      'TEXT'),
@@ -1200,19 +1208,25 @@ def create_hydrotech_quote(q: QuoteIn):
 @app.put("/api/hydrotech-quotes/{quote_id}")
 def update_hydrotech_quote(quote_id: int, q: QuoteIn):
     with get_db() as con:
-        existing = con.execute("SELECT id FROM hydrotech_quotes WHERE id=?", (quote_id,)).fetchone()
+        existing = con.execute("SELECT completed, completed_date FROM hydrotech_quotes WHERE id=?", (quote_id,)).fetchone()
         if not existing:
             raise HTTPException(404, "Hydrotech quote not found")
+        if q.completed and not existing['completed_date']:
+            completed_date = date.today().strftime('%Y-%m-%d')
+        elif not q.completed:
+            completed_date = None
+        else:
+            completed_date = existing['completed_date']
         con.execute("""
         UPDATE hydrotech_quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
             job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
             close_date=?,est_freight=?,lead_time=?,notes=?,
-            region=?,add_to_salesforce=?,completed=?,company_id=?,updated_at=datetime('now')
+            region=?,add_to_salesforce=?,completed=?,completed_date=?,company_id=?,updated_at=datetime('now')
         WHERE id=?
         """, (q.status,q.date_received,q.date_quoted,q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               q.close_date,q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed,q.company_id,quote_id))
+              q.region,q.add_to_salesforce,q.completed,completed_date,q.company_id,quote_id))
         return {"ok": True}
 
 @app.delete("/api/hydrotech-quotes/{quote_id}")
@@ -1513,6 +1527,7 @@ def init_glassworks_db():
         )""")
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
+                                 ('completed_date',    'TEXT'),
                                  ('region',            'TEXT'),
                                  ('deleted',           'INTEGER DEFAULT 0'),
                                  ('company_id',        'INTEGER')]:
@@ -1570,20 +1585,26 @@ def create_glassworks_quote(q: QuoteIn):
 @app.put("/api/glassworks-quotes/{quote_id}")
 def update_glassworks_quote(quote_id: int, q: QuoteIn):
     with get_db() as con:
-        existing = con.execute("SELECT id FROM glassworks_quotes WHERE id=?", (quote_id,)).fetchone()
+        existing = con.execute("SELECT completed, completed_date FROM glassworks_quotes WHERE id=?", (quote_id,)).fetchone()
         if not existing:
             raise HTTPException(404, "Glassworks quote not found")
+        if q.completed and not existing['completed_date']:
+            completed_date = date.today().strftime('%Y-%m-%d')
+        elif not q.completed:
+            completed_date = None
+        else:
+            completed_date = existing['completed_date']
         con.execute("""
         UPDATE glassworks_quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
             job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
             close_date=?,est_freight=?,lead_time=?,notes=?,
-            region=?,add_to_salesforce=?,completed=?,company_id=?,updated_at=datetime('now')
+            region=?,add_to_salesforce=?,completed=?,completed_date=?,company_id=?,updated_at=datetime('now')
         WHERE id=?
         """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
               q.sent_to,q.subject,q.job_name,
               q.customer,q.location,q.product,q.price,q.quantities,q.amount,
               normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
-              q.region,q.add_to_salesforce,q.completed,q.company_id,quote_id))
+              q.region,q.add_to_salesforce,q.completed,completed_date,q.company_id,quote_id))
         return {"ok": True}
 
 @app.delete("/api/glassworks-quotes/{quote_id}")
