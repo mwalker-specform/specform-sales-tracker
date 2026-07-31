@@ -38,11 +38,13 @@ def normalize_date(s: str) -> str:
     dt = parse_date(s)
     return dt.strftime('%Y-%m-%d') if dt else s
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile
+from fastapi import FastAPI, HTTPException, Query, UploadFile, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from passlib.context import CryptContext
+from jose import JWTError, jwt
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +54,12 @@ DATA_DIR = os.environ.get("DATA_DIR", BASE_DIR)
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH  = os.path.join(DATA_DIR, "quotes.db")
 STATIC   = os.path.join(BASE_DIR, "static")
+
+# ── Auth config ───────────────────────────────────────────────────────────────
+JWT_SECRET      = os.environ.get('JWT_SECRET', 'specform-salespartner-change-in-production')
+JWT_ALGORITHM   = 'HS256'
+JWT_EXPIRE_DAYS = 60
+pwd_ctx         = CryptContext(schemes=['bcrypt'], deprecated='auto')
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 @contextmanager
@@ -137,12 +145,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Auth middleware ────────────────────────────────────────────────────────────
+_UNPROTECTED = {'/api/auth/login'}
+
+@app.middleware('http')
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # Pass through: static files, SPA root, OPTIONS preflight, login endpoint
+    if (not path.startswith('/api/')
+            or path in _UNPROTECTED
+            or request.method == 'OPTIONS'):
+        return await call_next(request)
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header[7:] if auth_header.startswith('Bearer ') else ''
+    if not token:
+        return JSONResponse({'detail': 'Not authenticated'}, status_code=401)
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        request.state.user = payload
+    except JWTError:
+        return JSONResponse({'detail': 'Invalid or expired token'}, status_code=401)
+    return await call_next(request)
+
 @app.on_event("startup")
 def startup():
     init_db()
     init_hydrotech_db()
     init_glassworks_db()
     init_contacts_db()
+    init_users_db()
     migrate_dates()
 
 def migrate_dates():
@@ -2053,6 +2084,34 @@ def init_contacts_db():
             UNIQUE(company_id, contact_id)
         )""")
 
+def init_users_db():
+    """Create users table and seed initial accounts if they don't exist."""
+    INITIAL_USERS = [
+        ('mwalker@specformbc.com',   True),
+        ('bbautista@specformbc.com', False),
+        ('ftrevino@specformbc.com',  False),
+        ('brentm@specformbc.com',    False),
+    ]
+    DEFAULT_PASSWORD = 'Specform2026!'
+    with get_db() as con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            email      TEXT UNIQUE NOT NULL COLLATE NOCASE,
+            pwd_hash   TEXT NOT NULL,
+            is_admin   INTEGER DEFAULT 0,
+            is_active  INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now'))
+        )""")
+        for email, is_admin in INITIAL_USERS:
+            try:
+                con.execute(
+                    "INSERT INTO users (email, pwd_hash, is_admin) VALUES (?,?,?)",
+                    (email, pwd_ctx.hash(DEFAULT_PASSWORD), 1 if is_admin else 0)
+                )
+            except Exception:
+                pass  # Already exists
+
 class ContactIn(BaseModel):
     name:          Optional[str] = None
     company:       Optional[str] = None
@@ -2851,6 +2910,96 @@ def company_quotes_list(company_id: int):
                 results.append(d)
     results.sort(key=lambda r: r.get("date_received") or "", reverse=True)
     return results
+
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+class LoginIn(BaseModel):
+    email:    str
+    password: str
+
+class UserIn(BaseModel):
+    email:    str
+    password: str
+    is_admin: Optional[int] = 0
+
+class UserUpdateIn(BaseModel):
+    is_active: Optional[int] = None
+    is_admin:  Optional[int] = None
+    password:  Optional[str] = None
+
+def _require_admin(request: Request):
+    if not request.state.user.get('is_admin'):
+        raise HTTPException(403, 'Admin access required')
+
+@app.post('/api/auth/login')
+def login(body: LoginIn):
+    email = body.email.strip().lower()
+    with get_db() as con:
+        user = con.execute(
+            "SELECT * FROM users WHERE LOWER(email)=? AND is_active=1", (email,)
+        ).fetchone()
+    if not user or not pwd_ctx.verify(body.password, user['pwd_hash']):
+        raise HTTPException(401, 'Invalid email or password')
+    token = jwt.encode(
+        {
+            'sub':      email,
+            'is_admin': bool(user['is_admin']),
+            'exp':      datetime.utcnow() + timedelta(days=JWT_EXPIRE_DAYS),
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+    )
+    return {'token': token, 'email': email, 'is_admin': bool(user['is_admin'])}
+
+@app.get('/api/auth/me')
+def get_me(request: Request):
+    return {
+        'email':    request.state.user['sub'],
+        'is_admin': request.state.user.get('is_admin', False),
+    }
+
+@app.get('/api/admin/users')
+def admin_list_users(request: Request):
+    _require_admin(request)
+    with get_db() as con:
+        rows = con.execute(
+            "SELECT id, email, is_admin, is_active, created_at FROM users ORDER BY email"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+@app.post('/api/admin/users', status_code=201)
+def admin_add_user(request: Request, body: UserIn):
+    _require_admin(request)
+    with get_db() as con:
+        try:
+            con.execute(
+                "INSERT INTO users (email, pwd_hash, is_admin) VALUES (?,?,?)",
+                (body.email.strip().lower(), pwd_ctx.hash(body.password), body.is_admin or 0)
+            )
+        except Exception:
+            raise HTTPException(409, 'An account with that email already exists')
+    return {'ok': True}
+
+@app.put('/api/admin/users/{user_id}')
+def admin_update_user(user_id: int, request: Request, body: UserUpdateIn):
+    _require_admin(request)
+    with get_db() as con:
+        if not con.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone():
+            raise HTTPException(404, 'User not found')
+        if body.is_active is not None:
+            con.execute("UPDATE users SET is_active=? WHERE id=?", (body.is_active, user_id))
+        if body.is_admin is not None:
+            con.execute("UPDATE users SET is_admin=? WHERE id=?", (body.is_admin, user_id))
+        if body.password:
+            con.execute("UPDATE users SET pwd_hash=? WHERE id=?",
+                        (pwd_ctx.hash(body.password), user_id))
+    return {'ok': True}
+
+@app.delete('/api/admin/users/{user_id}')
+def admin_delete_user(user_id: int, request: Request):
+    _require_admin(request)
+    with get_db() as con:
+        con.execute("DELETE FROM users WHERE id=?", (user_id,))
+    return {'ok': True}
 
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
