@@ -170,6 +170,14 @@ async def auth_middleware(request: Request, call_next):
         return JSONResponse({'detail': 'Not authenticated'}, status_code=401)
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        # Confirm the account is still active in the database
+        with get_db() as con:
+            row = con.execute(
+                "SELECT is_active FROM users WHERE LOWER(email)=?",
+                (payload.get('sub', '').lower(),)
+            ).fetchone()
+        if not row or not row['is_active']:
+            return JSONResponse({'detail': 'Account deactivated'}, status_code=401)
         request.state.user = payload
     except JWTError:
         return JSONResponse({'detail': 'Invalid or expired token'}, status_code=401)
