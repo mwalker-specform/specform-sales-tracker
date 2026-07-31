@@ -2022,6 +2022,7 @@ function CompanyAccounts() {
   const [pickerOpen,          setPickerOpen]          = useState(false);
   const [pickerSearch,        setPickerSearch]        = useState('');
   const [quoteStats,          setQuoteStats]          = useState(null);
+  const [statsPeriod,         setStatsPeriod]         = useState('all');
   const [createContactOpen,   setCreateContactOpen]   = useState(false);
   const [createContactForm,   setCreateContactForm]   = useState({name:'',email:'',phone:'',role:''});
   const [createContactSaving, setCreateContactSaving] = useState(false);
@@ -2043,10 +2044,16 @@ function CompanyAccounts() {
       .catch(() => setLoading(false));
   }
 
-  function loadLinked(companyId) {
+  function loadStats(companyId, period) {
+    apiFetch(`/api/companies/${companyId}/quote-stats?period=${encodeURIComponent(period)}`)
+      .then(setQuoteStats).catch(() => {});
+  }
+
+  function loadLinked(companyId, period) {
+    const p = period || statsPeriod;
     Promise.all([
       apiFetch(`/api/companies/${companyId}/contacts`),
-      apiFetch(`/api/companies/${companyId}/quote-stats`),
+      apiFetch(`/api/companies/${companyId}/quote-stats?period=${encodeURIComponent(p)}`),
     ]).then(([contacts, stats]) => {
       setLinked(contacts);
       setQuoteStats(stats);
@@ -2464,35 +2471,57 @@ function CompanyAccounts() {
         ),
 
         // ── Quote Stats ──
-        quoteStats && React.createElement('div', {style:{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}},
-          React.createElement('div', {style:{
-            background:'#fff', borderRadius:'10px', border:'1px solid #e2e8f0',
-            boxShadow:'0 1px 3px rgba(0,0,0,0.06)', padding:'14px 16px'
-          }},
-            React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}},
-              '📋 Quoted'
-            ),
-            React.createElement('div', {style:{fontSize:'22px', fontWeight:700, color:'#1e293b'}},
-              '$' + (quoteStats.total_quoted || 0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
-            ),
-            React.createElement('div', {style:{fontSize:'12px', color:'#94a3b8', marginTop:'2px'}},
-              `${quoteStats.quote_count} quote${quoteStats.quote_count !== 1 ? 's' : ''}`
+        React.createElement('div', {style:{background:'#fff', borderRadius:'10px', border:'1px solid #e2e8f0', boxShadow:'0 1px 3px rgba(0,0,0,0.06)', overflow:'hidden'}},
+          // Header row with period dropdown
+          React.createElement('div', {style:{padding:'12px 16px', borderBottom:'1px solid #f0f4f8', display:'flex', alignItems:'center', justifyContent:'space-between', background:'#f8fafc'}},
+            React.createElement('div', {style:{fontWeight:700, fontSize:'14px', color:'#1F4E79'}}, '💰 Quote Activity'),
+            React.createElement('select', {
+              value: statsPeriod,
+              onChange: e => {
+                const p = e.target.value;
+                setStatsPeriod(p);
+                if (selected) loadStats(selected.id, p);
+              },
+              style:{fontSize:'12px', border:'1px solid #d1d5db', borderRadius:'6px',
+                padding:'3px 8px', background:'#fff', color:'#374151', cursor:'pointer'}
+            },
+              React.createElement('option', {value:'all'}, 'All Time'),
+              React.createElement('option', {value:'ytd'}, 'Year to Date'),
+              // Last 12 months
+              (() => {
+                const opts = [];
+                const now = new Date();
+                for (let i = 0; i < 12; i++) {
+                  const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                  const val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                  const label = d.toLocaleString('default', {month:'long', year:'numeric'});
+                  opts.push(React.createElement('option', {key:val, value:val}, label));
+                }
+                return opts;
+              })()
             )
           ),
-          React.createElement('div', {style:{
-            background:'#f0fdf4', borderRadius:'10px', border:'1px solid #bbf7d0',
-            boxShadow:'0 1px 3px rgba(0,0,0,0.06)', padding:'14px 16px'
-          }},
-            React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#166534', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}},
-              '🏆 Won'
-            ),
-            React.createElement('div', {style:{fontSize:'22px', fontWeight:700, color:'#16a34a'}},
-              '$' + (quoteStats.total_won || 0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
-            ),
-            React.createElement('div', {style:{fontSize:'12px', color:'#4ade80', marginTop:'2px'}},
-              `${quoteStats.won_count} deal${quoteStats.won_count !== 1 ? 's' : ''} won`
-            )
-          )
+          // Stat boxes
+          quoteStats
+            ? React.createElement('div', {style:{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0', borderTop:'none'}},
+                React.createElement('div', {style:{padding:'16px 20px', borderRight:'1px solid #f0f4f8'}},
+                  React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}}, '📋 Quoted'),
+                  React.createElement('div', {style:{fontSize:'24px', fontWeight:700, color:'#1e293b'}},
+                    '$' + (quoteStats.total_quoted || 0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
+                  ),
+                  React.createElement('div', {style:{fontSize:'12px', color:'#94a3b8', marginTop:'3px'}},
+                    `${quoteStats.quote_count} quote${quoteStats.quote_count !== 1 ? 's' : ''}`)
+                ),
+                React.createElement('div', {style:{padding:'16px 20px', background:'#f0fdf4'}},
+                  React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#166534', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}}, '🏆 Won'),
+                  React.createElement('div', {style:{fontSize:'24px', fontWeight:700, color:'#16a34a'}},
+                    '$' + (quoteStats.total_won || 0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
+                  ),
+                  React.createElement('div', {style:{fontSize:'12px', color:'#4ade80', marginTop:'3px'}},
+                    `${quoteStats.won_count} deal${quoteStats.won_count !== 1 ? 's' : ''} won`)
+                )
+              )
+            : React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#94a3b8', fontSize:'13px'}}, 'Loading…')
         ),
 
         // ── Linked Contacts section ──
