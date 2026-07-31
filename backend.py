@@ -146,7 +146,7 @@ app.add_middleware(
 )
 
 # ── Auth middleware ────────────────────────────────────────────────────────────
-_UNPROTECTED = {'/api/auth/login'}
+_UNPROTECTED = {'/api/auth/login', '/api/debug/users-check'}
 
 @app.middleware('http')
 async def auth_middleware(request: Request, call_next):
