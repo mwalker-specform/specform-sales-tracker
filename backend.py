@@ -2558,27 +2558,43 @@ def update_company_contact_role(company_id: int, contact_id: int, body: CompanyC
         return {"ok": True}
 
 @app.get("/api/companies/{company_id}/quote-stats")
-def company_quote_stats(company_id: int):
-    """Sum amount quoted and amount won across all 3 quote tables for a company."""
+def company_quote_stats(company_id: int, period: str = Query("all")):
+    """Sum amount quoted and amount won across all 3 quote tables for a company.
+    period: 'all' | 'ytd' | 'YYYY-MM'
+    """
+    import datetime
     tables = [
         ("quotes",           "deleted"),
         ("hydrotech_quotes", "deleted"),
         ("glassworks_quotes","deleted"),
     ]
+    # Build date clause
+    now = datetime.date.today()
+    date_clause = ""
+    date_params: list = []
+    if period == "ytd":
+        date_clause = "AND date_received >= ?"
+        date_params = [f"{now.year}-01-01"]
+    elif len(period) == 7 and period[4] == "-":   # YYYY-MM
+        date_clause = "AND date_received LIKE ?"
+        date_params = [f"{period}%"]
+
     total_quoted = 0.0
     total_won    = 0.0
     quote_count  = 0
     won_count    = 0
     with get_db() as con:
         for table, del_col in tables:
-            # Check column exists (graceful)
             cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
             if "company_id" not in cols or "amount" not in cols:
                 continue
             where_del = f"AND ({del_col} IS NULL OR {del_col}=0)" if del_col in cols else ""
+            has_date  = "date_received" in cols
+            d_clause  = date_clause if has_date else ""
+            params    = [company_id] + (date_params if has_date else [])
             rows = con.execute(
-                f"SELECT amount, status FROM {table} WHERE company_id=? {where_del}",
-                (company_id,)
+                f"SELECT amount, status FROM {table} WHERE company_id=? {where_del} {d_clause}",
+                params
             ).fetchall()
             for r in rows:
                 amt = r["amount"] or 0.0
@@ -2592,6 +2608,7 @@ def company_quote_stats(company_id: int):
         "total_won":    total_won,
         "quote_count":  quote_count,
         "won_count":    won_count,
+        "period":       period,
     }
 
 # ── Serve frontend ────────────────────────────────────────────────────────────
