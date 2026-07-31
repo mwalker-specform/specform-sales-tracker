@@ -2405,6 +2405,12 @@ def list_companies(search: Optional[str] = Query(None), region: Optional[str] = 
             SELECT c.*,
                    COUNT(DISTINCT cc.contact_id) as contact_count,
                    COALESCE((SELECT SUM(amount) FROM quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS rmax_quoted,
+                   COALESCE((SELECT SUM(amount) FROM hydrotech_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS hydrotech_quoted,
+                   COALESCE((SELECT SUM(amount) FROM glassworks_quotes
+                             WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0) AS glassworks_quoted,
+                   COALESCE((SELECT SUM(amount) FROM quotes
                              WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0)
                  + COALESCE((SELECT SUM(amount) FROM hydrotech_quotes
                              WHERE company_id=c.id AND (deleted IS NULL OR deleted=0)),0)
