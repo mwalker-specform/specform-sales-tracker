@@ -3030,17 +3030,18 @@ def admin_delete_user(user_id: int, request: Request):
 
 @app.post('/api/admin/users/{user_id}/send-welcome')
 def admin_send_welcome(user_id: int, request: Request):
-    import resend as _resend
+    import msal, requests as _req
 
     _require_admin(request)
 
-    api_key = os.environ.get('RESEND_API_KEY', '')
-    if not api_key:
-        raise HTTPException(500, 'Email not configured — set RESEND_API_KEY in Railway environment variables')
+    client_id     = os.environ.get('AZURE_CLIENT_ID', '')
+    client_secret = os.environ.get('AZURE_CLIENT_SECRET', '')
+    tenant_id     = os.environ.get('AZURE_TENANT_ID', GRAPH_TENANT_ID)
+    from_email    = os.environ.get('FROM_EMAIL', 'mwalker@specformbc.com')
+    app_url       = os.environ.get('APP_URL', 'https://specform-sales-tracker-production.up.railway.app')
 
-    _resend.api_key = api_key
-    app_url    = os.environ.get('APP_URL', 'https://specform-sales-tracker-production.up.railway.app')
-    from_email = os.environ.get('FROM_EMAIL', 'mwalker@specformbc.com')
+    if not client_id or not client_secret:
+        raise HTTPException(500, 'Email not configured — set AZURE_CLIENT_ID and AZURE_CLIENT_SECRET in Railway environment variables')
 
     with get_db() as con:
         user = con.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
@@ -3048,6 +3049,16 @@ def admin_send_welcome(user_id: int, request: Request):
         raise HTTPException(404, 'User not found')
 
     to_email = user['email']
+
+    # Get Microsoft Graph token
+    _msal_app = msal.ConfidentialClientApplication(
+        client_id,
+        authority=f'https://login.microsoftonline.com/{tenant_id}',
+        client_credential=client_secret,
+    )
+    token_result = _msal_app.acquire_token_for_client(scopes=['https://graph.microsoft.com/.default'])
+    if 'access_token' not in token_result:
+        raise HTTPException(500, f'Email auth failed: {token_result.get("error_description", "unknown error")}')
 
     html = f"""
 <!DOCTYPE html>
@@ -3104,15 +3115,24 @@ def admin_send_welcome(user_id: int, request: Request):
 </html>
 """
 
-    try:
-        _resend.Emails.send({
-            "from": from_email,
-            "to": [to_email],
-            "subject": "Welcome to SPECFORM SalesPartner",
-            "html": html,
-        })
-    except Exception as e:
-        raise HTTPException(500, f'Failed to send email: {e}')
+    resp = _req.post(
+        f'https://graph.microsoft.com/v1.0/users/{from_email}/sendMail',
+        headers={
+            'Authorization': f'Bearer {token_result["access_token"]}',
+            'Content-Type': 'application/json',
+        },
+        json={
+            'message': {
+                'subject': 'Welcome to SPECFORM SalesPartner',
+                'body': {'contentType': 'HTML', 'content': html},
+                'toRecipients': [{'emailAddress': {'address': to_email}}],
+            }
+        },
+        timeout=30,
+    )
+
+    if resp.status_code not in (200, 202):
+        raise HTTPException(500, f'Failed to send email: {resp.status_code} {resp.text[:300]}')
 
     return {'ok': True, 'sent_to': to_email}
 
