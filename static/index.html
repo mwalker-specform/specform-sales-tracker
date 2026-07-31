@@ -2019,8 +2019,11 @@ function CompanyAccounts() {
   const [linked,        setLinked]        = useState([]);     // contacts for selected company
   const [linkSearch,    setLinkSearch]    = useState('');
   const [allContacts,   setAllContacts]   = useState([]);
-  const [pickerOpen,    setPickerOpen]    = useState(false);
-  const [pickerSearch,  setPickerSearch]  = useState('');
+  const [pickerOpen,          setPickerOpen]          = useState(false);
+  const [pickerSearch,        setPickerSearch]        = useState('');
+  const [createContactOpen,   setCreateContactOpen]   = useState(false);
+  const [createContactForm,   setCreateContactForm]   = useState({name:'',email:'',phone:'',role:''});
+  const [createContactSaving, setCreateContactSaving] = useState(false);
   const [saving,        setSaving]        = useState(false);
   const [msg,           setMsg]           = useState('');
   const [regionFilter,  setRegionFilter]  = useState('All');
@@ -2131,6 +2134,41 @@ function CompanyAccounts() {
         setPickerSearch('');
       })
       .catch(e => flash('❌ Already linked or error'));
+  }
+
+  // ── Create contact & auto-link ──
+  function createAndLinkContact() {
+    if (!createContactForm.name.trim()) return;
+    setCreateContactSaving(true);
+    apiFetch('/api/contacts', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        name:    createContactForm.name,
+        email:   createContactForm.email,
+        phone:   createContactForm.phone,
+        company: selected.name,
+      })
+    })
+    .then(newContact =>
+      apiFetch(`/api/companies/${selected.id}/contacts`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ contact_id: newContact.id, role: createContactForm.role })
+      })
+    )
+    .then(() => Promise.all([
+      apiFetch(`/api/companies/${selected.id}/contacts`),
+      apiFetch('/api/contacts')
+    ]))
+    .then(([linkedData, allData]) => {
+      setLinked(linkedData);
+      setAllContacts(allData);
+      setCreateContactOpen(false);
+      setCreateContactForm({name:'', email:'', phone:'', role:''});
+      setCreateContactSaving(false);
+    })
+    .catch(() => setCreateContactSaving(false));
   }
 
   // ── Unlink contact ──
@@ -2427,11 +2465,18 @@ function CompanyAccounts() {
             React.createElement('div', {style:{fontWeight:700, fontSize:'14px', color:'#1F4E79'}},
               `👥 Linked Contacts (${linked.length})`
             ),
-            React.createElement('button', {
-              onClick: () => { setPickerOpen(true); setPickerSearch(''); },
-              style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
-                padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
-            }, '+ Link Contact')
+            React.createElement('div', {style:{display:'flex', gap:'6px'}},
+              React.createElement('button', {
+                onClick: () => { setCreateContactOpen(true); setCreateContactForm({name:'',email:'',phone:'',role:''}); },
+                style:{background:'#059669', color:'#fff', border:'none', borderRadius:'6px',
+                  padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+              }, '+ New Contact'),
+              React.createElement('button', {
+                onClick: () => { setPickerOpen(true); setPickerSearch(''); },
+                style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
+                  padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+              }, '+ Link Existing')
+            )
           ),
 
           // Search within linked contacts
@@ -2483,6 +2528,80 @@ function CompanyAccounts() {
                   )
                 )
               )
+        )
+      ),
+
+      // ── Create Contact Modal ──
+      createContactOpen && React.createElement('div', {
+        style:{position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:1000,
+          display:'flex', alignItems:'center', justifyContent:'center'},
+        onClick: e => { if (e.target === e.currentTarget) setCreateContactOpen(false); }
+      },
+        React.createElement('div', {style:{
+          background:'#fff', borderRadius:'12px', width:'420px', maxWidth:'95vw',
+          boxShadow:'0 20px 60px rgba(0,0,0,0.3)', overflow:'hidden'
+        }},
+          React.createElement('div', {style:{padding:'16px 20px', borderBottom:'1px solid #e2e8f0', display:'flex', alignItems:'center', justifyContent:'space-between'}},
+            React.createElement('h3', {style:{fontSize:'15px', fontWeight:700, color:'#1e293b', margin:0}}, '✚ New Contact'),
+            React.createElement('button', {onClick:()=>setCreateContactOpen(false),
+              style:{background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#94a3b8', lineHeight:1}}, '×')
+          ),
+          React.createElement('div', {style:{padding:'16px 20px', display:'flex', flexDirection:'column', gap:'12px'}},
+            React.createElement('div', null,
+              React.createElement('label', {style:{display:'block', fontSize:'12px', fontWeight:600, color:'#374151', marginBottom:'4px'}}, 'Name *'),
+              React.createElement('input', {
+                type:'text', autoFocus:true,
+                value:createContactForm.name,
+                onChange: e => setCreateContactForm(f => ({...f, name:e.target.value})),
+                style:{...inp}
+              })
+            ),
+            React.createElement('div', null,
+              React.createElement('label', {style:{display:'block', fontSize:'12px', fontWeight:600, color:'#374151', marginBottom:'4px'}}, 'Email'),
+              React.createElement('input', {
+                type:'email',
+                value:createContactForm.email,
+                onChange: e => setCreateContactForm(f => ({...f, email:e.target.value})),
+                style:{...inp}
+              })
+            ),
+            React.createElement('div', null,
+              React.createElement('label', {style:{display:'block', fontSize:'12px', fontWeight:600, color:'#374151', marginBottom:'4px'}}, 'Phone'),
+              React.createElement('input', {
+                type:'tel',
+                value:createContactForm.phone,
+                onChange: e => setCreateContactForm(f => ({...f, phone:e.target.value})),
+                style:{...inp}
+              })
+            ),
+            React.createElement('div', null,
+              React.createElement('label', {style:{display:'block', fontSize:'12px', fontWeight:600, color:'#374151', marginBottom:'4px'}}, 'Role at this company'),
+              React.createElement('input', {
+                type:'text',
+                value:createContactForm.role,
+                placeholder:'e.g. Buyer, Decision Maker…',
+                onChange: e => setCreateContactForm(f => ({...f, role:e.target.value})),
+                style:{...inp}
+              })
+            )
+          ),
+          React.createElement('div', {style:{padding:'12px 20px', borderTop:'1px solid #e2e8f0', display:'flex', justifyContent:'flex-end', gap:'8px'}},
+            React.createElement('button', {
+              onClick:()=>setCreateContactOpen(false),
+              style:{background:'none', border:'1px solid #e2e8f0', borderRadius:'6px',
+                padding:'6px 14px', fontSize:'13px', cursor:'pointer', color:'#64748b'}
+            }, 'Cancel'),
+            React.createElement('button', {
+              onClick: createAndLinkContact,
+              disabled: !createContactForm.name.trim() || createContactSaving,
+              style:{
+                background: !createContactForm.name.trim() || createContactSaving ? '#94a3b8' : '#059669',
+                color:'#fff', border:'none', borderRadius:'6px', padding:'6px 14px',
+                fontSize:'13px', fontWeight:600,
+                cursor: !createContactForm.name.trim() || createContactSaving ? 'default' : 'pointer'
+              }
+            }, createContactSaving ? 'Saving…' : 'Create & Link')
+          )
         )
       ),
 
