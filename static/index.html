@@ -2285,6 +2285,16 @@ function CompanyAccounts() {
               style:{background:'#0e7490', color:'#fff', border:'none', borderRadius:'6px',
                 padding:'4px 8px', fontSize:'11px', fontWeight:600, cursor:'pointer', opacity: importing ? 0.6 : 1}
             }, importing ? '⏳' : '⬇ Import'),
+            React.createElement('a', {
+              href: '/api/companies/export',
+              download: 'company_accounts.xlsx',
+              title: 'Export all companies + contacts to Excel',
+              style:{
+                background:'#16a34a', color:'#fff', border:'none', borderRadius:'6px',
+                padding:'4px 9px', fontSize:'11px', fontWeight:600, cursor:'pointer',
+                textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'3px'
+              }
+            }, '📥 Export'),
             React.createElement('button', {
               onClick: () => { setAdding(true); setSelected(null); setEditForm(null); },
               style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
