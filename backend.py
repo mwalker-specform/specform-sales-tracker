@@ -2967,6 +2967,23 @@ def get_me(request: Request):
         'is_admin': request.state.user.get('is_admin', False),
     }
 
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
+@app.post('/api/auth/change-password')
+def change_password(body: ChangePasswordIn, request: Request):
+    email = request.state.user['sub']
+    if len(body.new_password) < 8:
+        raise HTTPException(400, 'New password must be at least 8 characters')
+    with get_db() as con:
+        user = con.execute("SELECT * FROM users WHERE LOWER(email)=?", (email,)).fetchone()
+        if not user or not _verify_pw(body.current_password, user['pwd_hash']):
+            raise HTTPException(401, 'Current password is incorrect')
+        con.execute("UPDATE users SET pwd_hash=? WHERE LOWER(email)=?",
+                    (_hash_pw(body.new_password), email))
+    return {'ok': True}
+
 @app.get('/api/admin/users')
 def admin_list_users(request: Request):
     _require_admin(request)
