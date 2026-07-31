@@ -2131,7 +2131,6 @@ function CompanyAccounts() {
   const [saving,        setSaving]        = useState(false);
   const [msg,           setMsg]           = useState('');
   const [regionFilter,  setRegionFilter]  = useState('All');
-  const [importing,     setImporting]     = useState(false);
 
   function loadCompanies(s, r) {
     setLoading(true);
@@ -2167,17 +2166,6 @@ function CompanyAccounts() {
   }
 
   useEffect(() => { loadCompanies(); loadAllContacts(); }, []);
-
-  function importFromQuotes() {
-    setImporting(true);
-    apiFetch('/api/companies/import-from-quotes', { method: 'POST' })
-      .then(data => {
-        flash(`✓ ${data.inserted} new companies added, ${data.updated} regions filled in, ${data.skipped} already existed`);
-        loadCompanies();
-      })
-      .catch(() => flash('❌ Import failed'))
-      .finally(() => setImporting(false));
-  }
 
   function selectCompany(co) {
     setSelected(co);
@@ -2377,13 +2365,6 @@ function CompanyAccounts() {
         React.createElement('div', {style:{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px'}},
           React.createElement('h2', {style:{fontSize:'15px', fontWeight:700, color:'#1F4E79', margin:0}}, '🏢 Companies'),
           React.createElement('div', {style:{display:'flex', gap:'5px'}},
-            React.createElement('button', {
-              onClick: importFromQuotes,
-              disabled: importing,
-              title: 'Import company names from all quotes',
-              style:{background:'#0e7490', color:'#fff', border:'none', borderRadius:'6px',
-                padding:'4px 8px', fontSize:'11px', fontWeight:600, cursor:'pointer', opacity: importing ? 0.6 : 1}
-            }, importing ? '⏳' : '⬇ Import'),
             React.createElement('a', {
               href: '/api/companies/export',
               download: 'company_accounts.xlsx',
