@@ -2268,7 +2268,7 @@ function CompanyAccounts() {
   return React.createElement('div', {style:{display:'flex', gap:'0', minHeight:'70vh', background:'#f8fafc', borderRadius:'12px', overflow:'hidden', border:'1px solid #e2e8f0', boxShadow:'0 1px 4px rgba(0,0,0,0.07)'}},
 
     // ── LEFT: Company list ────────────────────────────────────────────────────
-    React.createElement('div', {style:{width:'280px', flexShrink:0, borderRight:'1px solid #e2e8f0', background:'#fff', display:'flex', flexDirection:'column', height:'75vh', position:'sticky', top:0}},
+    React.createElement('div', {style:{width:'400px', flexShrink:0, borderRight:'1px solid #e2e8f0', background:'#fff', display:'flex', flexDirection:'column', height:'75vh', position:'sticky', top:0}},
 
       // Header
       React.createElement('div', {style:{padding:'14px 14px 10px', borderBottom:'1px solid #f0f4f8'}},
@@ -2306,32 +2306,84 @@ function CompanyAccounts() {
         )
       ),
 
-      // List
+      // List — grouped by region, sorted by total_quoted desc within each group
       React.createElement('div', {style:{flex:1, overflowY:'auto', minHeight:0}},
         loading
           ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#9ca3af', fontSize:'13px'}}, 'Loading…')
           : companies.length === 0
             ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#9ca3af', fontSize:'13px'}}, 'No companies yet')
-            : companies.map(co =>
-                React.createElement('div', {
-                  key: co.id,
-                  onClick: () => selectCompany(co),
-                  style:{
-                    padding:'10px 14px', cursor:'pointer', borderBottom:'1px solid #f0f4f8',
-                    background: selected && selected.id===co.id ? '#EFF6FF' : '#fff',
-                    borderLeft: selected && selected.id===co.id ? '3px solid #1F4E79' : '3px solid transparent',
-                  }
-                },
-                  React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'5px', flexWrap:'wrap'}},
-                    React.createElement('span', {style:{fontWeight:600, fontSize:'13px', color:'#1e293b'}}, co.name),
-                    co.strong_market_partner ? React.createElement('span', {title:'Strong Market Partner', style:{fontSize:'12px'}}, '⭐') : null,
-                    co.large_account_opportunity ? React.createElement('span', {title:'Large Account Opportunity', style:{fontSize:'12px'}}, '🎯') : null
-                  ),
-                  React.createElement('div', {style:{fontSize:'11px', color:'#64748b', marginTop:'2px'}},
-                    [co.region, co.phone, `${co.contact_count||0} contact${co.contact_count===1?'':'s'}`].filter(Boolean).join(' · ')
-                  )
-                )
-              )
+            : (() => {
+                const fmt$ = v => v >= 1000 ? '$' + (v/1000).toFixed(0) + 'k' : '$' + (v||0).toFixed(0);
+                const REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
+                // Group by region
+                const grouped = {};
+                companies.forEach(co => {
+                  const r = co.region || 'No Region';
+                  if (!grouped[r]) grouped[r] = [];
+                  grouped[r].push(co);
+                });
+                // Sort each group by total_quoted desc
+                Object.values(grouped).forEach(arr =>
+                  arr.sort((a,b) => (b.total_quoted||0) - (a.total_quoted||0))
+                );
+                // Ordered region keys: known order first, then others, then 'No Region'
+                const knownRegions = REGION_ORDER.filter(r => grouped[r]);
+                const otherRegions = Object.keys(grouped).filter(r => !REGION_ORDER.includes(r) && r !== 'No Region');
+                const regionKeys = [...knownRegions, ...otherRegions, ...(grouped['No Region'] ? ['No Region'] : [])];
+
+                return regionKeys.flatMap(region =>
+                  [
+                    // Region header
+                    React.createElement('div', {
+                      key: 'hdr-' + region,
+                      style:{
+                        padding:'6px 14px', fontSize:'10px', fontWeight:700,
+                        color:'#1F4E79', textTransform:'uppercase', letterSpacing:'0.08em',
+                        background:'#EFF6FF', borderBottom:'1px solid #dbeafe',
+                        display:'flex', alignItems:'center', justifyContent:'space-between'
+                      }
+                    },
+                      React.createElement('span', null, region === 'No Region' ? '— Unassigned —' : region),
+                      React.createElement('span', {style:{fontWeight:500, color:'#64748b', fontSize:'10px'}},
+                        grouped[region].length + ' co.')
+                    ),
+                    // Company rows
+                    ...grouped[region].map(co =>
+                      React.createElement('div', {
+                        key: co.id,
+                        onClick: () => selectCompany(co),
+                        style:{
+                          padding:'9px 14px', cursor:'pointer', borderBottom:'1px solid #f0f4f8',
+                          background: selected && selected.id===co.id ? '#EFF6FF' : '#fff',
+                          borderLeft: selected && selected.id===co.id ? '3px solid #1F4E79' : '3px solid transparent',
+                          transition:'background 0.1s'
+                        }
+                      },
+                        // Row 1: name + badges + amount right-aligned
+                        React.createElement('div', {style:{display:'flex', alignItems:'center', justifyContent:'space-between', gap:'6px'}},
+                          React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'4px', minWidth:0}},
+                            React.createElement('span', {style:{
+                              fontWeight:600, fontSize:'13px', color:'#1e293b',
+                              overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'
+                            }}, co.name),
+                            co.strong_market_partner     ? React.createElement('span', {title:'Strong Market Partner',     style:{fontSize:'11px', flexShrink:0}}, '⭐') : null,
+                            co.large_account_opportunity ? React.createElement('span', {title:'Large Account Opportunity', style:{fontSize:'11px', flexShrink:0}}, '🎯') : null
+                          ),
+                          co.total_quoted > 0 && React.createElement('span', {style:{
+                            fontSize:'12px', fontWeight:700, color:'#1F4E79', flexShrink:0,
+                            background:'#eff6ff', borderRadius:'4px', padding:'1px 5px'
+                          }}, fmt$(co.total_quoted))
+                        ),
+                        // Row 2: phone + contacts
+                        React.createElement('div', {style:{fontSize:'11px', color:'#64748b', marginTop:'2px', display:'flex', gap:'8px'}},
+                          co.phone && React.createElement('span', null, co.phone),
+                          React.createElement('span', null, `${co.contact_count||0} contact${co.contact_count===1?'':'s'}`)
+                        )
+                      )
+                    )
+                  ]
+                );
+              })()
       )
     ),
 
