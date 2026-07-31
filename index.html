@@ -151,8 +151,31 @@ const GLASSWORKS_CFG = {
 function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
   const [form, setForm] = useState(quote || {});
   const [saving, setSaving] = useState(false);
+  const [companies, setCompanies] = useState([]);
+  const [acSearch, setAcSearch] = useState('');
+  const [acOpen, setAcOpen]   = useState(false);
 
   const set = (k,v) => setForm(f => ({...f,[k]:v}));
+
+  useEffect(() => {
+    apiFetch('/api/companies').then(cs => {
+      setCompanies(cs);
+      if (quote?.company_id) {
+        const linked = cs.find(c => c.id === quote.company_id);
+        if (linked) setAcSearch(linked.name);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const acFiltered = acSearch
+    ? companies.filter(c => c.name.toLowerCase().includes(acSearch.toLowerCase()))
+    : companies;
+
+  function selectCompany(co) {
+    set('company_id', co ? co.id : null);
+    setAcSearch(co ? co.name : '');
+    setAcOpen(false);
+  }
 
   async function save() {
     setSaving(true);
@@ -177,7 +200,7 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
         React.createElement('button', {onClick:onClose, className:'text-gray-400 hover:text-gray-600 text-2xl leading-none'}, '×')
       ),
       React.createElement('div', {className:'grid grid-cols-1 sm:grid-cols-2 gap-3'},
-        FIELDS.map(f => {
+        FIELDS.flatMap(f => {
           const val = form[f.key] ?? '';
           let el;
           if (f.type === 'select') {
@@ -192,10 +215,61 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
             el = React.createElement('input', {type:f.type==='number'?'number':'text', value:val, onChange:e=>set(f.key,e.target.value)});
           }
           const wide = f.type==='textarea' || f.key==='subject' || f.key==='product';
-          return React.createElement('div', {key:f.key, className:wide?'col-span-2':'col-span-1'},
+          const fieldEl = React.createElement('div', {key:f.key, className:wide?'col-span-2':'col-span-1'},
             React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, f.label),
             el
           );
+
+          // Inject "Linked to Account" combobox right after Customer field
+          if (f.key === 'customer') {
+            const linkedName = form.company_id
+              ? (companies.find(c => c.id === form.company_id)?.name || acSearch)
+              : '';
+            const accountField = React.createElement('div', {key:'linked_account', className:'col-span-1', style:{position:'relative'}},
+              React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, 'Linked to Account'),
+              React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'4px'}},
+                React.createElement('input', {
+                  type:'text',
+                  value: acOpen ? acSearch : (linkedName || acSearch),
+                  placeholder: 'Search company accounts…',
+                  onFocus: () => { setAcOpen(true); setAcSearch(''); },
+                  onChange: e => { setAcSearch(e.target.value); setAcOpen(true); },
+                  onBlur: () => setTimeout(() => setAcOpen(false), 180),
+                  style:{flex:1}
+                }),
+                form.company_id && React.createElement('button', {
+                  type:'button',
+                  onClick: () => selectCompany(null),
+                  style:{background:'none', border:'none', color:'#94a3b8', cursor:'pointer',
+                    fontSize:'18px', lineHeight:1, padding:'0 2px', flexShrink:0}
+                }, '×')
+              ),
+              acOpen && React.createElement('div', {
+                style:{position:'absolute', top:'100%', left:0, right:0, zIndex:200,
+                  background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px',
+                  boxShadow:'0 6px 20px rgba(0,0,0,0.12)', maxHeight:'200px', overflowY:'auto', marginTop:'2px'}
+              },
+                acFiltered.length === 0
+                  ? React.createElement('div', {style:{padding:'10px 14px', fontSize:'12px', color:'#94a3b8'}}, 'No matches')
+                  : acFiltered.map(co => React.createElement('div', {
+                      key: co.id,
+                      onMouseDown: () => selectCompany(co),
+                      style:{
+                        padding:'8px 14px', cursor:'pointer', fontSize:'13px',
+                        background: form.company_id === co.id ? '#EFF6FF' : '#fff',
+                        fontWeight: form.company_id === co.id ? 600 : 400,
+                        borderBottom: '1px solid #f8fafc'
+                      }
+                    },
+                    React.createElement('div', {style:{color:'#1e293b'}}, co.name),
+                    co.region && React.createElement('div', {style:{fontSize:'11px', color:'#64748b'}}, co.region)
+                  ))
+              )
+            );
+            return [fieldEl, accountField];
+          }
+
+          return [fieldEl];
         })
       ),
       React.createElement('div', {className:'flex justify-end gap-2 mt-6'},
@@ -370,6 +444,8 @@ function Dashboard({ cfg = RMAX_CFG }) {
   })() : locationChartData.map(r => ({region: r.name, total: r.total, won: r.won, verbal: r.verbal}));
 
   return React.createElement('div', {className:'space-y-6'},
+    // Dashboard title
+    React.createElement('h2', {className:'text-xl font-bold text-gray-800'}, cfg.label + ' Dashboard'),
     // KPI row with month selector
     React.createElement('div', {className:'space-y-3'},
       React.createElement('div', {className:'flex items-center justify-between'},
@@ -660,7 +736,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
         }
       },
         React.createElement('span', {style:{fontSize:'15px'}}, '📊'),
-        'RMAX Dashboard'
+        cfg.label + ' Dashboard'
       )
     ),
     // Toolbar row 1: search + status + actions
@@ -813,7 +889,16 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                           q.status==='Won' && React.createElement('span',{style:{color:'#f59e0b',marginRight:'5px',fontSize:'14px',lineHeight:1}},'★'),
                           q.job_name||q.subject||'—'
                         ),
-                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#334155',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},q.customer||'—'),
+                        React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#334155',overflow:'hidden',whiteSpace:'nowrap'}},
+                          React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:'2px'}},
+                            React.createElement('span',{style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},q.customer||'—'),
+                            !q.company_id && React.createElement('span',{style:{
+                              fontSize:'10px',fontWeight:600,color:'#b45309',background:'#fef3c7',
+                              border:'1px solid #fde68a',borderRadius:'4px',padding:'0 5px',
+                              whiteSpace:'nowrap',display:'inline-block',width:'fit-content'
+                            }},'⚠ No Account')
+                          )
+                        ),
                         React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},q.location||'—'),
                         React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},q.sent_to||'—'),
                         React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},q.product||'—'),
@@ -894,7 +979,12 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                         React.createElement('span', {className:'font-bold text-gray-800 break-words'},
                           React.createElement('span', {className:'font-normal text-gray-500'}, 'Job Name: '),
                           q.job_name || q.subject || '—'
-                        )
+                        ),
+                        !q.company_id && React.createElement('span', {style:{
+                          fontSize:'10px',fontWeight:600,color:'#b45309',background:'#fef3c7',
+                          border:'1px solid #fde68a',borderRadius:'4px',padding:'1px 6px',
+                          whiteSpace:'nowrap',flexShrink:0
+                        }},'⚠ No Account')
                       ),
                       React.createElement('div', {className:'flex items-center gap-3 shrink-0'},
                         React.createElement('span', {className:'font-bold text-gray-700 whitespace-nowrap'}, fmt(q.amount)),
@@ -1448,8 +1538,17 @@ function CustomerDirectory() {
   const [adding,      setAdding]      = useState(false);
   const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',region:'',notes:''});
   const [regionFilter, setRegionFilter] = useState('All');
+  const [companies,    setCompanies]   = useState([]);
+  const [editLinkedCo, setEditLinkedCo] = useState(null);
+  const [editCoSearch, setEditCoSearch] = useState('');
+  const [newLinkedCo,  setNewLinkedCo]  = useState(null);
+  const [newCoSearch,  setNewCoSearch]  = useState('');
   const CUSTOMER_TYPES = ['','Contractor','Distributor','General Contractor','Architect'];
   const REGIONS = ['','Central Texas','Southeast Texas','The Valley'];
+
+  useEffect(() => {
+    apiFetch('/api/companies').then(data => setCompanies(data || [])).catch(() => {});
+  }, []);
 
   function loadContacts(f, s) {
     setLoading(true);
@@ -1497,10 +1596,38 @@ function CustomerDirectory() {
       .finally(() => { setScanning(false); setTimeout(() => setImportMsg(''), 10000); });
   }
 
-  function startEdit(c) { setEditingId(c.id); setEditForm({...c}); }
-  function cancelEdit() { setEditingId(null); setEditForm({}); }
+  function startEdit(c) {
+    setEditingId(c.id);
+    setEditForm({...c});
+    const linked = c.linked_company_id
+      ? (companies.find(co => co.id === c.linked_company_id) || {id:c.linked_company_id, name:c.linked_company_name||'Unknown'})
+      : null;
+    setEditLinkedCo(linked);
+    setEditCoSearch('');
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditForm({});
+    setEditLinkedCo(null);
+    setEditCoSearch('');
+  }
   function saveEdit() {
-    apiFetch(`/api/contacts/${editingId}`, {method:'PUT', body:JSON.stringify(editForm)})
+    const contactId = editingId;
+    const prevLinkedId = editForm.linked_company_id || null;
+    apiFetch(`/api/contacts/${contactId}`, {method:'PUT', body:JSON.stringify(editForm)})
+      .then(() => {
+        const tasks = [];
+        if (editLinkedCo && editLinkedCo.id !== prevLinkedId) {
+          if (prevLinkedId) tasks.push(apiFetch(`/api/companies/${prevLinkedId}/contacts/${contactId}`, {method:'DELETE'}).catch(()=>{}));
+          tasks.push(apiFetch(`/api/companies/${editLinkedCo.id}/contacts`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({contact_id:contactId, role:''})
+          }).catch(()=>{}));
+        } else if (!editLinkedCo && prevLinkedId) {
+          tasks.push(apiFetch(`/api/companies/${prevLinkedId}/contacts/${contactId}`, {method:'DELETE'}).catch(()=>{}));
+        }
+        return Promise.all(tasks);
+      })
       .then(() => { cancelEdit(); loadContacts(); });
   }
   function deleteContact(id) {
@@ -1527,9 +1654,20 @@ function CustomerDirectory() {
   }
   function saveNew() {
     apiFetch('/api/contacts', {method:'POST', body:JSON.stringify(newForm)})
+      .then(data => {
+        const linkTask = newLinkedCo && data.id
+          ? apiFetch(`/api/companies/${newLinkedCo.id}/contacts`, {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({contact_id:data.id, role:''})
+            }).catch(()=>{})
+          : Promise.resolve();
+        return linkTask;
+      })
       .then(() => {
         setAdding(false);
         setNewForm({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',notes:''});
+        setNewLinkedCo(null);
+        setNewCoSearch('');
         loadContacts();
       })
       .catch(() => alert('Could not save — check that the email address is unique'));
@@ -1622,7 +1760,12 @@ function CustomerDirectory() {
         c.company && React.createElement('div', {
           className:'text-xs text-gray-500 text-center mt-0.5 w-full truncate font-medium',
           title:c.company
-        }, c.company)
+        }, c.company),
+        c.linked_company_name && React.createElement('div', {
+          className:'text-xs font-semibold mt-1 px-2 py-0.5 rounded-full truncate',
+          style:{background:'#dbeafe',color:'#1e40af',maxWidth:'100%'},
+          title:'Linked account: '+c.linked_company_name
+        }, '🏢 ' + c.linked_company_name)
       ),
       // Contact info rows
       React.createElement('div', {className:'px-4 py-3 flex-1 space-y-2'},
@@ -1682,8 +1825,50 @@ function CustomerDirectory() {
     );
   }
 
+  // Searchable company-link field
+  function renderCompanyLinkField(linkedCo, setLinkedCo, coSearch, setCoSearch) {
+    const filtered = coSearch
+      ? companies.filter(c => c.name.toLowerCase().includes(coSearch.toLowerCase())).slice(0,8)
+      : [];
+    return React.createElement('div', {className:'sm:col-span-2'},
+      React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, 'Linked Account'),
+      React.createElement('div', {style:{position:'relative'}},
+        React.createElement('input', {
+          type:'text',
+          placeholder: linkedCo ? linkedCo.name : 'Search company accounts…',
+          value: coSearch,
+          onChange: e => setCoSearch(e.target.value),
+          className:'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300'
+        }),
+        filtered.length > 0 && React.createElement('div', {
+          style:{position:'absolute',top:'100%',left:0,right:0,zIndex:99,
+                 background:'#fff',border:'1px solid #d1d5db',borderRadius:'8px',
+                 boxShadow:'0 4px 12px rgba(0,0,0,0.12)',maxHeight:'160px',overflowY:'auto',marginTop:'2px'}
+        },
+          filtered.map(co => React.createElement('div', {
+            key:co.id,
+            onMouseDown: e => { e.preventDefault(); setLinkedCo(co); setCoSearch(''); },
+            style:{padding:'8px 12px',fontSize:'13px',cursor:'pointer'},
+            className:'hover:bg-blue-50'
+          }, co.name))
+        )
+      ),
+      linkedCo && React.createElement('div', {className:'flex items-center gap-2 mt-1.5'},
+        React.createElement('span', {
+          className:'text-xs font-semibold px-2 py-0.5 rounded-full',
+          style:{background:'#dbeafe',color:'#1e40af'}
+        }, '🏢 ' + linkedCo.name),
+        React.createElement('button', {
+          type:'button',
+          onClick: () => { setLinkedCo(null); setCoSearch(''); },
+          className:'text-xs text-gray-400 hover:text-red-500'
+        }, '✕ Remove')
+      )
+    );
+  }
+
   // Modal renderer (not a component — avoids remount issues)
-  function renderModal(title, form, setForm, onSave, onCancel, extraActions) {
+  function renderModal(title, form, setForm, onSave, onCancel, extraActions, additionalFields) {
     return React.createElement('div', {
       className:'fixed inset-0 z-50 flex items-center justify-center p-4',
       style:{background:'rgba(0,0,0,0.45)'},
@@ -1708,7 +1893,8 @@ function CustomerDirectory() {
           formField('Customer Type','customer_type',form,setForm,'ctype'),
           React.createElement('div', {className:'sm:col-span-2'},
             formField('Notes','notes',form,setForm,'textarea')
-          )
+          ),
+          ...(additionalFields || [])
         ),
         React.createElement('div', {className:'flex items-center justify-between px-6 py-4 border-t bg-gray-50'},
           React.createElement('div', {}, extraActions || null),
@@ -1904,14 +2090,955 @@ function CustomerDirectory() {
         onClick: () => fetchSig(editForm.email, editingId),
         disabled: sigFetching === editForm.email,
         className:'text-sm text-blue-600 hover:text-blue-800 disabled:opacity-40'
-      }, sigFetching === editForm.email ? '⏳ Fetching…' : '✉ Fetch from email sig')
+      }, sigFetching === editForm.email ? '⏳ Fetching…' : '✉ Fetch from email sig'),
+      [renderCompanyLinkField(editLinkedCo, setEditLinkedCo, editCoSearch, setEditCoSearch)]
     ),
 
     // ── Add contact modal ──
     adding && renderModal(
       'New Contact',
       newForm, setNewForm,
-      saveNew, () => setAdding(false)
+      saveNew, () => { setAdding(false); setNewLinkedCo(null); setNewCoSearch(''); },
+      null,
+      [renderCompanyLinkField(newLinkedCo, setNewLinkedCo, newCoSearch, setNewCoSearch)]
+    )
+  );
+}
+
+// ── Company Accounts ──────────────────────────────────────────────────────────
+function CompanyAccounts() {
+  const [companies,     setCompanies]     = useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [search,        setSearch]        = useState('');
+  const [selected,      setSelected]      = useState(null);   // company object
+  const [editForm,      setEditForm]      = useState(null);   // null = view, obj = editing
+  const [adding,        setAdding]        = useState(false);
+  const [newForm,       setNewForm]       = useState({name:'',address:'',phone:'',website:'',region:'',notes:'',strong_market_partner:0,large_account_opportunity:0});
+  const COMPANY_REGIONS = ['','Central Texas','Southeast Texas','The Valley'];
+  const [linked,        setLinked]        = useState([]);     // contacts for selected company
+  const [linkSearch,    setLinkSearch]    = useState('');
+  const [allContacts,   setAllContacts]   = useState([]);
+  const [pickerOpen,          setPickerOpen]          = useState(false);
+  const [pickerSearch,        setPickerSearch]        = useState('');
+  const [quoteStats,          setQuoteStats]          = useState(null);
+  const [statsPeriod,         setStatsPeriod]         = useState('all');
+  const [quotesModalOpen,     setQuotesModalOpen]     = useState(false);
+  const [quotesModalData,     setQuotesModalData]     = useState([]);
+  const [quotesModalLoading,  setQuotesModalLoading]  = useState(false);
+  const [createContactOpen,   setCreateContactOpen]   = useState(false);
+  const [createContactForm,   setCreateContactForm]   = useState({name:'',email:'',phone:'',role:''});
+  const [createContactSaving, setCreateContactSaving] = useState(false);
+  const [saving,        setSaving]        = useState(false);
+  const [msg,           setMsg]           = useState('');
+  const [regionFilter,  setRegionFilter]  = useState('All');
+  const [importing,     setImporting]     = useState(false);
+
+  function loadCompanies(s, r) {
+    setLoading(true);
+    const q  = s !== undefined ? s : search;
+    const rf = r !== undefined ? r : regionFilter;
+    const params = [];
+    if (q)            params.push(`search=${encodeURIComponent(q)}`);
+    if (rf && rf !== 'All') params.push(`region=${encodeURIComponent(rf)}`);
+    const url = '/api/companies' + (params.length ? '?' + params.join('&') : '');
+    apiFetch(url)
+      .then(data => { setCompanies(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }
+
+  function loadStats(companyId, period) {
+    apiFetch(`/api/companies/${companyId}/quote-stats?period=${encodeURIComponent(period)}`)
+      .then(setQuoteStats).catch(() => {});
+  }
+
+  function loadLinked(companyId, period) {
+    const p = period || statsPeriod;
+    Promise.all([
+      apiFetch(`/api/companies/${companyId}/contacts`),
+      apiFetch(`/api/companies/${companyId}/quote-stats?period=${encodeURIComponent(p)}`),
+    ]).then(([contacts, stats]) => {
+      setLinked(contacts);
+      setQuoteStats(stats);
+    }).catch(() => {});
+  }
+
+  function loadAllContacts() {
+    apiFetch('/api/contacts').then(setAllContacts).catch(() => {});
+  }
+
+  useEffect(() => { loadCompanies(); loadAllContacts(); }, []);
+
+  function importFromQuotes() {
+    setImporting(true);
+    apiFetch('/api/companies/import-from-quotes', { method: 'POST' })
+      .then(data => {
+        flash(`✓ ${data.inserted} new companies added, ${data.updated} regions filled in, ${data.skipped} already existed`);
+        loadCompanies();
+      })
+      .catch(() => flash('❌ Import failed'))
+      .finally(() => setImporting(false));
+  }
+
+  function selectCompany(co) {
+    setSelected(co);
+    setEditForm(null);
+    setLinkSearch('');
+    if (co) loadLinked(co.id);
+    else { setLinked([]); setQuoteStats(null); }
+  }
+
+  function flash(m) { setMsg(m); setTimeout(() => setMsg(''), 4000); }
+
+  // ── Save new company ──
+  function saveNew() {
+    if (!newForm.name.trim()) return;
+    setSaving(true);
+    apiFetch('/api/companies', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(newForm) })
+      .then(data => {
+        const created = { ...newForm, id: data.id, contact_count: 0 };
+        setCompanies(prev => [...prev, created].sort((a,b) => a.name.localeCompare(b.name)));
+        setAdding(false);
+        setNewForm({name:'',address:'',phone:'',website:'',region:'',notes:'',strong_market_partner:0,large_account_opportunity:0});
+        selectCompany(created);
+        flash('✓ Company created');
+      })
+      .catch(() => flash('❌ Save failed'))
+      .finally(() => setSaving(false));
+  }
+
+  // ── Save edit ──
+  function saveEdit() {
+    if (!editForm.name.trim()) return;
+    setSaving(true);
+    apiFetch(`/api/companies/${selected.id}`, { method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(editForm) })
+      .then(() => {
+        const updated = { ...selected, ...editForm };
+        setSelected(updated);
+        setCompanies(prev => prev.map(c => c.id === selected.id ? updated : c));
+        setEditForm(null);
+        flash('✓ Saved');
+      })
+      .catch(() => flash('❌ Save failed'))
+      .finally(() => setSaving(false));
+  }
+
+  // ── Delete company ──
+  function deleteCompany(co) {
+    if (!confirm(`Delete "${co.name}"? This will also remove all linked contacts.`)) return;
+    apiFetch(`/api/companies/${co.id}`, { method:'DELETE' })
+      .then(() => {
+        setCompanies(prev => prev.filter(c => c.id !== co.id));
+        if (selected && selected.id === co.id) { setSelected(null); setLinked([]); }
+        flash('✓ Company deleted');
+      })
+      .catch(() => flash('❌ Delete failed'));
+  }
+
+  // ── Link contact ──
+  function linkContact(contact) {
+    apiFetch(`/api/companies/${selected.id}/contacts`, { method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ contact_id: contact.id, role: '' }) })
+      .then(() => {
+        loadLinked(selected.id);
+        setCompanies(prev => prev.map(c => c.id === selected.id
+          ? {...c, contact_count: (c.contact_count||0)+1} : c));
+        setPickerOpen(false);
+        setPickerSearch('');
+      })
+      .catch(e => flash('❌ Already linked or error'));
+  }
+
+  // ── Create contact & auto-link ──
+  function createAndLinkContact() {
+    if (!createContactForm.name.trim()) return;
+    setCreateContactSaving(true);
+    apiFetch('/api/contacts', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        name:    createContactForm.name,
+        email:   createContactForm.email,
+        phone:   createContactForm.phone,
+        company: selected.name,
+      })
+    })
+    .then(newContact =>
+      apiFetch(`/api/companies/${selected.id}/contacts`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ contact_id: newContact.id, role: createContactForm.role })
+      })
+    )
+    .then(() => Promise.all([
+      apiFetch(`/api/companies/${selected.id}/contacts`),
+      apiFetch('/api/contacts')
+    ]))
+    .then(([linkedData, allData]) => {
+      setLinked(linkedData);
+      setAllContacts(allData);
+      setCreateContactOpen(false);
+      setCreateContactForm({name:'', email:'', phone:'', role:''});
+      setCreateContactSaving(false);
+    })
+    .catch(() => setCreateContactSaving(false));
+  }
+
+  // ── Unlink contact ──
+  function unlinkContact(contact) {
+    apiFetch(`/api/companies/${selected.id}/contacts/${contact.id}`, { method:'DELETE' })
+      .then(() => {
+        setLinked(prev => prev.filter(c => c.id !== contact.id));
+        setCompanies(prev => prev.map(c => c.id === selected.id
+          ? {...c, contact_count: Math.max(0,(c.contact_count||1)-1)} : c));
+      })
+      .catch(() => flash('❌ Remove failed'));
+  }
+
+  // ── Update role inline ──
+  function updateRole(contact, role) {
+    apiFetch(`/api/companies/${selected.id}/contacts/${contact.id}`, { method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ contact_id: contact.id, role }) })
+      .then(() => setLinked(prev => prev.map(c => c.id === contact.id ? {...c, role} : c)))
+      .catch(() => {});
+  }
+
+  // Contacts not yet linked to this company
+  const linkedIds = new Set(linked.map(c => c.id));
+  const availableContacts = allContacts.filter(c =>
+    !linkedIds.has(c.id) &&
+    (!pickerSearch || (c.name||'').toLowerCase().includes(pickerSearch.toLowerCase())
+      || (c.company||'').toLowerCase().includes(pickerSearch.toLowerCase())
+      || (c.email||'').toLowerCase().includes(pickerSearch.toLowerCase()))
+  );
+
+  const filteredLinked = linked.filter(c =>
+    !linkSearch ||
+    (c.name||'').toLowerCase().includes(linkSearch.toLowerCase()) ||
+    (c.email||'').toLowerCase().includes(linkSearch.toLowerCase())
+  );
+
+  // Shared input style
+  const inp = {
+    width:'100%', padding:'6px 10px', border:'1px solid #d1d5db',
+    borderRadius:'6px', fontSize:'13px', boxSizing:'border-box'
+  };
+
+  function fieldRow(label, key, form, setForm, type='text') {
+    return React.createElement('div', {key, style:{marginBottom:'10px'}},
+      React.createElement('label', {style:{display:'block', fontSize:'11px', fontWeight:600, color:'#6b7280', marginBottom:'3px', textTransform:'uppercase', letterSpacing:'0.5px'}}, label),
+      type === 'textarea'
+        ? React.createElement('textarea', {
+            value: form[key]||'', rows:3,
+            onChange: e => setForm(f=>({...f,[key]:e.target.value})),
+            style:{...inp, resize:'vertical'}
+          })
+        : React.createElement('input', {
+            type, value: form[key]||'',
+            onChange: e => setForm(f=>({...f,[key]:e.target.value})),
+            style: inp
+          })
+    );
+  }
+
+  function selectRow(label, key, form, setForm, options) {
+    return React.createElement('div', {key, style:{marginBottom:'10px'}},
+      React.createElement('label', {style:{display:'block', fontSize:'11px', fontWeight:600, color:'#6b7280', marginBottom:'3px', textTransform:'uppercase', letterSpacing:'0.5px'}}, label),
+      React.createElement('select', {
+        value: form[key]||'',
+        onChange: e => setForm(f=>({...f,[key]:e.target.value})),
+        style:{...inp, background:'#fff'}
+      }, options.map(o => React.createElement('option', {key:o, value:o}, o||'— None —')))
+    );
+  }
+
+  function checkboxRow(label, key, form, setForm, color='#1F4E79') {
+    const checked = !!(form[key]);
+    return React.createElement('label', {key, style:{display:'flex', alignItems:'center', gap:'10px', cursor:'pointer', padding:'7px 10px', borderRadius:'8px', border:`1px solid ${checked ? color : '#e2e8f0'}`, background: checked ? `${color}12` : '#fafafa', marginBottom:'8px', userSelect:'none'}},
+      React.createElement('input', {
+        type:'checkbox', checked,
+        onChange: e => setForm(f=>({...f,[key]: e.target.checked ? 1 : 0})),
+        style:{width:'16px', height:'16px', accentColor: color, cursor:'pointer', flexShrink:0}
+      }),
+      React.createElement('span', {style:{fontSize:'13px', fontWeight: checked ? 700 : 500, color: checked ? color : '#64748b'}}, label)
+    );
+  }
+
+  return React.createElement('div', {style:{display:'flex', gap:'0', minHeight:'70vh', background:'#f8fafc', borderRadius:'12px', overflow:'hidden', border:'1px solid #e2e8f0', boxShadow:'0 1px 4px rgba(0,0,0,0.07)'}},
+
+    // ── LEFT: Company list ────────────────────────────────────────────────────
+    React.createElement('div', {style:{width:'680px', flexShrink:0, borderRight:'1px solid #e2e8f0', background:'#fff', display:'flex', flexDirection:'column', height:'75vh', position:'sticky', top:0}},
+
+      // Header
+      React.createElement('div', {style:{padding:'14px 14px 10px', borderBottom:'1px solid #f0f4f8'}},
+        React.createElement('div', {style:{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px'}},
+          React.createElement('h2', {style:{fontSize:'15px', fontWeight:700, color:'#1F4E79', margin:0}}, '🏢 Companies'),
+          React.createElement('div', {style:{display:'flex', gap:'5px'}},
+            React.createElement('button', {
+              onClick: importFromQuotes,
+              disabled: importing,
+              title: 'Import company names from all quotes',
+              style:{background:'#0e7490', color:'#fff', border:'none', borderRadius:'6px',
+                padding:'4px 8px', fontSize:'11px', fontWeight:600, cursor:'pointer', opacity: importing ? 0.6 : 1}
+            }, importing ? '⏳' : '⬇ Import'),
+            React.createElement('a', {
+              href: '/api/companies/export',
+              download: 'company_accounts.xlsx',
+              title: 'Export all companies + contacts to Excel',
+              style:{
+                background:'#16a34a', color:'#fff', border:'none', borderRadius:'6px',
+                padding:'4px 9px', fontSize:'11px', fontWeight:600, cursor:'pointer',
+                textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'3px'
+              }
+            }, '📥 Export'),
+            React.createElement('button', {
+              onClick: () => { setAdding(true); setSelected(null); setEditForm(null); },
+              style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
+                padding:'4px 10px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+            }, '+ Add')
+          )
+        ),
+        React.createElement('input', {
+          placeholder:'Search companies…', value:search,
+          onChange: e => { setSearch(e.target.value); loadCompanies(e.target.value, regionFilter); },
+          style:{...inp, fontSize:'12px', marginBottom:'6px'}
+        }),
+        React.createElement('select', {
+          value: regionFilter,
+          onChange: e => { setRegionFilter(e.target.value); loadCompanies(search, e.target.value); },
+          style:{...inp, fontSize:'12px', background:'#fff'}
+        },
+          React.createElement('option', {value:'All'}, 'All Regions'),
+          ['Central Texas','Southeast Texas','The Valley'].map(r =>
+            React.createElement('option', {key:r, value:r}, r)
+          )
+        )
+      ),
+
+      // Column header row
+      React.createElement('div', {style:{
+        display:'grid', gridTemplateColumns:'2fr 1.6fr 1fr 100px',
+        padding:'5px 14px 5px 17px',
+        background:'#f1f5f9', borderBottom:'2px solid #e2e8f0',
+        position:'sticky', top:0, zIndex:2, flexShrink:0
+      }},
+        React.createElement('div', {style:{fontSize:'10px', fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em'}}, 'Company'),
+        React.createElement('div', {style:{fontSize:'10px', fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em'}}, 'Address'),
+        React.createElement('div', {style:{fontSize:'10px', fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em'}}, 'Region'),
+        React.createElement('div', {style:{fontSize:'10px', fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', textAlign:'right'}}, 'Quoted')
+      ),
+
+      // List — 3-level: Product Line → Region → Companies
+      React.createElement('div', {style:{flex:1, overflowY:'auto', minHeight:0}},
+        loading
+          ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#9ca3af', fontSize:'13px'}}, 'Loading…')
+          : companies.length === 0
+            ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#9ca3af', fontSize:'13px'}}, 'No companies yet')
+            : (() => {
+                const fmtQ = v => {
+                  if (!v || v === 0) return '—';
+                  return v >= 1000000 ? '$' + (v/1000000).toFixed(1) + 'M'
+                       : v >= 1000    ? '$' + (v/1000).toFixed(0) + 'k'
+                       : '$' + v.toFixed(0);
+                };
+                const REGION_ORDER = ['Central Texas','Southeast Texas','The Valley'];
+                const PRODUCT_LINES = [
+                  {key:'rmax',       label:'RMAX',       field:'rmax_quoted',       bg:'#1e3a5f', accent:'#1F4E79'},
+                  {key:'hydrotech',  label:'Hydrotech',  field:'hydrotech_quoted',  bg:'#064e3b', accent:'#065f46'},
+                  {key:'glassworks', label:'Glassworks', field:'glassworks_quoted', bg:'#7c2d12', accent:'#9a3412'},
+                ];
+
+                const makeCompanyRow = (co, amtField, rowIdx) => {
+                  const isSelected = selected && selected.id === co.id;
+                  const rowBg = isSelected ? '#dbeafe' : (rowIdx % 2 === 0 ? '#ffffff' : '#f4f6f8');
+                  return React.createElement('div', {
+                    key: co.id + '-' + amtField,
+                    onClick: () => selectCompany(co),
+                    style:{
+                      display:'grid', gridTemplateColumns:'2fr 1.6fr 1fr 100px',
+                      padding:'7px 14px', cursor:'pointer',
+                      borderBottom:'1px solid #eef2f7',
+                      borderLeft: isSelected ? '3px solid #1F4E79' : '3px solid transparent',
+                      background: rowBg, alignItems:'center', transition:'background 0.1s'
+                    }
+                  },
+                    React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'4px', minWidth:0, paddingRight:'8px'}},
+                      React.createElement('span', {style:{fontWeight:600, fontSize:'12px', color:'#1e293b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}, co.name),
+                      co.strong_market_partner     ? React.createElement('span', {title:'Strong Market Partner',     style:{fontSize:'11px', flexShrink:0}}, '⭐') : null,
+                      co.large_account_opportunity ? React.createElement('span', {title:'Large Account Opportunity', style:{fontSize:'11px', flexShrink:0}}, '🎯') : null
+                    ),
+                    React.createElement('div', {style:{fontSize:'11px', color:'#475569', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', paddingRight:'8px'}},
+                      co.address || '—'),
+                    React.createElement('div', {style:{fontSize:'11px', color:'#0369a1', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}},
+                      co.region || '—'),
+                    React.createElement('div', {style:{fontSize:'12px', fontWeight:700, color:'#1F4E79', textAlign:'right'}},
+                      fmtQ(amtField ? co[amtField] : co.total_quoted))
+                  );
+                };
+
+                const makeRegionRows = (companies, amtField) => {
+                  const grouped = {};
+                  companies.forEach(co => {
+                    const r = co.region || 'No Region';
+                    if (!grouped[r]) grouped[r] = [];
+                    grouped[r].push(co);
+                  });
+                  Object.values(grouped).forEach(arr =>
+                    arr.sort((a,b) => ((b[amtField]||0) - (a[amtField]||0)))
+                  );
+                  const known = REGION_ORDER.filter(r => grouped[r]);
+                  const other = Object.keys(grouped).filter(r => !REGION_ORDER.includes(r) && r !== 'No Region');
+                  const keys  = [...known, ...other, ...(grouped['No Region'] ? ['No Region'] : [])];
+                  let rowIdx  = 0;
+                  return keys.flatMap(region => [
+                    React.createElement('div', {
+                      key: 'reg-' + amtField + '-' + region,
+                      style:{padding:'4px 14px 4px 24px', fontSize:'10px', fontWeight:700,
+                        color:'#1F4E79', textTransform:'uppercase', letterSpacing:'0.07em',
+                        background:'#dbeafe', borderBottom:'1px solid #bfdbfe',
+                        display:'flex', alignItems:'center', justifyContent:'space-between'}
+                    },
+                      React.createElement('span', null, region === 'No Region' ? '— Unassigned —' : region),
+                      React.createElement('span', {style:{fontWeight:500, color:'#64748b'}}, grouped[region].length + ' co.')
+                    ),
+                    ...grouped[region].map(co => makeCompanyRow(co, amtField, rowIdx++))
+                  ]);
+                };
+
+                const rows = [];
+                PRODUCT_LINES.forEach(pl => {
+                  const plCos = companies.filter(co => (co[pl.field] || 0) > 0);
+                  if (!plCos.length) return;
+                  // Product line header
+                  rows.push(React.createElement('div', {
+                    key: 'pl-' + pl.key,
+                    style:{padding:'6px 14px', fontSize:'11px', fontWeight:800,
+                      color:'#fff', textTransform:'uppercase', letterSpacing:'0.1em',
+                      background: pl.bg, borderBottom:'2px solid rgba(255,255,255,0.15)',
+                      display:'flex', alignItems:'center', justifyContent:'space-between'}
+                  },
+                    React.createElement('span', null, pl.label),
+                    React.createElement('span', {style:{fontWeight:500, fontSize:'10px', opacity:0.8}}, plCos.length + ' accounts')
+                  ));
+                  rows.push(...makeRegionRows(plCos, pl.field));
+                });
+
+                // Companies with no quotes in any line
+                const noQuotes = companies.filter(co => !co.total_quoted || co.total_quoted === 0);
+                if (noQuotes.length) {
+                  rows.push(React.createElement('div', {
+                    key: 'pl-none',
+                    style:{padding:'6px 14px', fontSize:'11px', fontWeight:800,
+                      color:'#fff', textTransform:'uppercase', letterSpacing:'0.1em',
+                      background:'#64748b', borderBottom:'2px solid rgba(255,255,255,0.15)',
+                      display:'flex', alignItems:'center', justifyContent:'space-between'}
+                  },
+                    React.createElement('span', null, 'No Quotes Linked'),
+                    React.createElement('span', {style:{fontWeight:500, fontSize:'10px', opacity:0.8}}, noQuotes.length + ' accounts')
+                  ));
+                  noQuotes.sort((a,b) => a.name.localeCompare(b.name));
+                  noQuotes.forEach((co, i) => rows.push(makeCompanyRow(co, null, i)));
+                }
+
+                return rows;
+              })()
+      )
+    ),
+
+    // ── RIGHT: Detail panel ───────────────────────────────────────────────────
+    React.createElement('div', {style:{flex:1, display:'flex', flexDirection:'column', overflowY:'auto', padding:'20px'}},
+
+      // Flash message
+      msg && React.createElement('div', {style:{
+        background: msg.startsWith('✓') ? '#dcfce7' : '#fee2e2',
+        color: msg.startsWith('✓') ? '#166534' : '#991b1b',
+        padding:'8px 14px', borderRadius:'8px', fontSize:'13px', marginBottom:'14px'
+      }}, msg),
+
+      // ── Add Company form ──
+      adding && React.createElement('div', {style:{background:'#fff', borderRadius:'10px', padding:'18px', border:'1px solid #e2e8f0', marginBottom:'18px', boxShadow:'0 1px 3px rgba(0,0,0,0.06)'}},
+        React.createElement('h3', {style:{fontSize:'14px', fontWeight:700, color:'#1F4E79', marginBottom:'14px'}}, '➕ New Company'),
+        fieldRow('Company Name *', 'name', newForm, setNewForm),
+        fieldRow('Address', 'address', newForm, setNewForm),
+        fieldRow('Phone', 'phone', newForm, setNewForm),
+        fieldRow('Website', 'website', newForm, setNewForm, 'url'),
+        selectRow('Region', 'region', newForm, setNewForm, COMPANY_REGIONS),
+        fieldRow('Notes', 'notes', newForm, setNewForm, 'textarea'),
+        React.createElement('div', {style:{marginTop:'12px', marginBottom:'4px'}},
+          checkboxRow('⭐ Strong Market Partner',       'strong_market_partner',     newForm, setNewForm, '#b45309'),
+          checkboxRow('🎯 Large Account Opportunity',  'large_account_opportunity', newForm, setNewForm, '#1F4E79')
+        ),
+        React.createElement('div', {style:{display:'flex', gap:'8px', marginTop:'6px'}},
+          React.createElement('button', {
+            onClick: saveNew, disabled: saving || !newForm.name.trim(),
+            style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
+              padding:'7px 18px', fontSize:'13px', fontWeight:600, cursor:'pointer', opacity: saving?0.6:1}
+          }, saving ? 'Saving…' : 'Create Company'),
+          React.createElement('button', {
+            onClick: () => setAdding(false),
+            style:{background:'#f1f5f9', color:'#475569', border:'none', borderRadius:'6px',
+              padding:'7px 14px', fontSize:'13px', cursor:'pointer'}
+          }, 'Cancel')
+        )
+      ),
+
+      // ── No selection placeholder ──
+      !selected && !adding && React.createElement('div', {style:{
+        flex:1, display:'flex', alignItems:'center', justifyContent:'center',
+        color:'#94a3b8', fontSize:'14px', flexDirection:'column', gap:'8px', minHeight:'200px'
+      }},
+        React.createElement('div', {style:{fontSize:'40px'}}, '🏢'),
+        React.createElement('div', null, 'Select a company or add a new one')
+      ),
+
+      // ── Selected company detail ──
+      selected && React.createElement('div', {style:{display:'flex', flexDirection:'column', gap:'16px'}},
+
+        // Company header card
+        React.createElement('div', {style:{background:'#fff', borderRadius:'10px', padding:'18px', border:'1px solid #e2e8f0', boxShadow:'0 1px 3px rgba(0,0,0,0.06)'}},
+          editForm
+            // ── Edit mode ──
+            ? React.createElement('div', null,
+                React.createElement('h3', {style:{fontSize:'14px', fontWeight:700, color:'#1F4E79', marginBottom:'14px'}}, '✏️ Edit Company'),
+                fieldRow('Company Name *', 'name', editForm, setEditForm),
+                fieldRow('Address', 'address', editForm, setEditForm),
+                fieldRow('Phone', 'phone', editForm, setEditForm),
+                fieldRow('Website', 'website', editForm, setEditForm, 'url'),
+                selectRow('Region', 'region', editForm, setEditForm, COMPANY_REGIONS),
+                fieldRow('Notes', 'notes', editForm, setEditForm, 'textarea'),
+                React.createElement('div', {style:{marginTop:'12px', marginBottom:'4px'}},
+                  checkboxRow('⭐ Strong Market Partner',       'strong_market_partner',     editForm, setEditForm, '#b45309'),
+                  checkboxRow('🎯 Large Account Opportunity',  'large_account_opportunity', editForm, setEditForm, '#1F4E79')
+                ),
+                React.createElement('div', {style:{display:'flex', gap:'8px', marginTop:'6px'}},
+                  React.createElement('button', {
+                    onClick: saveEdit, disabled: saving || !editForm.name.trim(),
+                    style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
+                      padding:'7px 18px', fontSize:'13px', fontWeight:600, cursor:'pointer', opacity:saving?0.6:1}
+                  }, saving ? 'Saving…' : 'Save'),
+                  React.createElement('button', {
+                    onClick: () => setEditForm(null),
+                    style:{background:'#f1f5f9', color:'#475569', border:'none', borderRadius:'6px',
+                      padding:'7px 14px', fontSize:'13px', cursor:'pointer'}
+                  }, 'Cancel')
+                )
+              )
+            // ── View mode ──
+            : React.createElement('div', null,
+                React.createElement('div', {style:{display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'12px'}},
+                  React.createElement('h3', {style:{fontSize:'18px', fontWeight:700, color:'#1e293b', margin:0}}, selected.name),
+                  React.createElement('div', {style:{display:'flex', gap:'6px'}},
+                    React.createElement('button', {
+                      onClick: () => setEditForm({name:selected.name||'', address:selected.address||'', phone:selected.phone||'', website:selected.website||'', region:selected.region||'', notes:selected.notes||'', strong_market_partner:selected.strong_market_partner||0, large_account_opportunity:selected.large_account_opportunity||0}),
+                      style:{background:'#f1f5f9', color:'#475569', border:'none', borderRadius:'6px',
+                        padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+                    }, '✏️ Edit'),
+                    React.createElement('button', {
+                      onClick: () => deleteCompany(selected),
+                      style:{background:'#fee2e2', color:'#dc2626', border:'none', borderRadius:'6px',
+                        padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+                    }, '🗑 Delete')
+                  )
+                ),
+                React.createElement('div', {style:{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px 20px'}},
+                  selected.phone && React.createElement('div', null,
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Phone'),
+                    React.createElement('div', {style:{fontSize:'13px', color:'#334155'}}, selected.phone)
+                  ),
+                  selected.website && React.createElement('div', null,
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Website'),
+                    React.createElement('a', {href:selected.website, target:'_blank', rel:'noopener noreferrer',
+                      style:{fontSize:'13px', color:'#2563eb', textDecoration:'none'}}, selected.website)
+                  ),
+                  selected.region && React.createElement('div', null,
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Region'),
+                    React.createElement('div', {style:{fontSize:'13px', color:'#334155'}}, selected.region)
+                  ),
+                  selected.address && React.createElement('div', {style:{gridColumn:'1/-1'}},
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Address'),
+                    React.createElement('div', {style:{fontSize:'13px', color:'#334155', whiteSpace:'pre-line'}}, selected.address)
+                  ),
+                  selected.notes && React.createElement('div', {style:{gridColumn:'1/-1'}},
+                    React.createElement('div', {style:{fontSize:'10px', fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}, 'Notes'),
+                    React.createElement('div', {style:{fontSize:'13px', color:'#334155', whiteSpace:'pre-line'}}, selected.notes)
+                  )
+                ),
+                // Account flags row
+                (selected.strong_market_partner || selected.large_account_opportunity) &&
+                React.createElement('div', {style:{display:'flex', gap:'8px', marginTop:'12px', flexWrap:'wrap'}},
+                  selected.strong_market_partner ? React.createElement('span', {style:{
+                    display:'inline-flex', alignItems:'center', gap:'5px',
+                    background:'#fef3c7', color:'#b45309', border:'1px solid #fcd34d',
+                    borderRadius:'20px', padding:'4px 12px', fontSize:'12px', fontWeight:700
+                  }}, '⭐ Strong Market Partner') : null,
+                  selected.large_account_opportunity ? React.createElement('span', {style:{
+                    display:'inline-flex', alignItems:'center', gap:'5px',
+                    background:'#EFF6FF', color:'#1F4E79', border:'1px solid #93c5fd',
+                    borderRadius:'20px', padding:'4px 12px', fontSize:'12px', fontWeight:700
+                  }}, '🎯 Large Account Opportunity') : null
+                )
+              )
+        ),
+
+        // ── Quote Stats ──
+        React.createElement('div', {style:{background:'#fff', borderRadius:'10px', border:'1px solid #e2e8f0', boxShadow:'0 1px 3px rgba(0,0,0,0.06)', overflow:'hidden'}},
+          // Header row with period dropdown
+          React.createElement('div', {style:{padding:'12px 16px', borderBottom:'1px solid #f0f4f8', display:'flex', alignItems:'center', justifyContent:'space-between', background:'#f8fafc'}},
+            React.createElement('div', {style:{fontWeight:700, fontSize:'14px', color:'#1F4E79'}}, '💰 Quote Activity'),
+            React.createElement('select', {
+              value: statsPeriod,
+              onChange: e => {
+                const p = e.target.value;
+                setStatsPeriod(p);
+                if (selected) loadStats(selected.id, p);
+              },
+              style:{fontSize:'12px', border:'1px solid #d1d5db', borderRadius:'6px',
+                padding:'3px 8px', background:'#fff', color:'#374151', cursor:'pointer'}
+            },
+              React.createElement('option', {value:'all'}, 'All Time'),
+              React.createElement('option', {value:'ytd'}, 'Year to Date'),
+              // 2026 months: July through December
+              ['2026-07','2026-08','2026-09','2026-10','2026-11','2026-12'].map(val => {
+                const [y,m] = val.split('-');
+                const label = new Date(+y, +m-1, 1).toLocaleString('default', {month:'long', year:'numeric'});
+                return React.createElement('option', {key:val, value:val}, label);
+              })
+            )
+          ),
+          // Stat boxes
+          quoteStats
+            ? React.createElement('div', {style:{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0', borderTop:'none'}},
+                React.createElement('div', {
+                  style:{padding:'16px 20px', borderRight:'1px solid #f0f4f8', cursor:'pointer',
+                    transition:'background 0.15s'},
+                  title:'Click to view all quotes',
+                  onMouseEnter: e => e.currentTarget.style.background='#f8fafc',
+                  onMouseLeave: e => e.currentTarget.style.background='',
+                  onClick: () => {
+                    setQuotesModalOpen(true);
+                    setQuotesModalLoading(true);
+                    apiFetch(`/api/companies/${selected.id}/quotes`)
+                      .then(data => { setQuotesModalData(data); setQuotesModalLoading(false); })
+                      .catch(() => setQuotesModalLoading(false));
+                  }
+                },
+                  React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}}, '📋 Quoted'),
+                  React.createElement('div', {style:{fontSize:'24px', fontWeight:700, color:'#1e293b'}},
+                    '$' + (quoteStats.total_quoted || 0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
+                  ),
+                  React.createElement('div', {style:{fontSize:'12px', color:'#94a3b8', marginTop:'3px', display:'flex', alignItems:'center', gap:'4px'}},
+                    `${quoteStats.quote_count} quote${quoteStats.quote_count !== 1 ? 's' : ''}`,
+                    React.createElement('span', {style:{fontSize:'10px', color:'#93c5fd'}}, '↗ view')
+                  )
+                ),
+                React.createElement('div', {style:{padding:'16px 20px', background:'#f0fdf4'}},
+                  React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#166534', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}}, '🏆 Won'),
+                  React.createElement('div', {style:{fontSize:'24px', fontWeight:700, color:'#16a34a'}},
+                    '$' + (quoteStats.total_won || 0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
+                  ),
+                  React.createElement('div', {style:{fontSize:'12px', color:'#4ade80', marginTop:'3px'}},
+                    `${quoteStats.won_count} deal${quoteStats.won_count !== 1 ? 's' : ''} won`)
+                )
+              )
+            : React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#94a3b8', fontSize:'13px'}}, 'Loading…')
+        ),
+
+        // ── Linked Contacts section ──
+        React.createElement('div', {style:{background:'#fff', borderRadius:'10px', border:'1px solid #e2e8f0', boxShadow:'0 1px 3px rgba(0,0,0,0.06)', overflow:'hidden'}},
+
+          // Section header
+          React.createElement('div', {style:{padding:'14px 16px', borderBottom:'1px solid #f0f4f8', display:'flex', alignItems:'center', justifyContent:'space-between', background:'#f8fafc'}},
+            React.createElement('div', {style:{fontWeight:700, fontSize:'14px', color:'#1F4E79'}},
+              `👥 Linked Contacts (${linked.length})`
+            ),
+            React.createElement('div', {style:{display:'flex', gap:'6px'}},
+              React.createElement('button', {
+                onClick: () => { setCreateContactOpen(true); setCreateContactForm({name:'',email:'',phone:'',role:''}); },
+                style:{background:'#059669', color:'#fff', border:'none', borderRadius:'6px',
+                  padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+              }, '+ New Contact'),
+              React.createElement('button', {
+                onClick: () => { setPickerOpen(true); setPickerSearch(''); },
+                style:{background:'#1F4E79', color:'#fff', border:'none', borderRadius:'6px',
+                  padding:'5px 12px', fontSize:'12px', fontWeight:600, cursor:'pointer'}
+              }, '+ Link Existing')
+            )
+          ),
+
+          // Search within linked contacts
+          linked.length > 4 && React.createElement('div', {style:{padding:'8px 16px', borderBottom:'1px solid #f0f4f8'}},
+            React.createElement('input', {
+              placeholder:'Filter linked contacts…', value:linkSearch,
+              onChange: e => setLinkSearch(e.target.value),
+              style:{...inp, fontSize:'12px'}
+            })
+          ),
+
+          // Linked contact rows
+          filteredLinked.length === 0
+            ? React.createElement('div', {style:{padding:'20px', textAlign:'center', color:'#94a3b8', fontSize:'13px'}},
+                linked.length === 0 ? 'No contacts linked yet' : 'No matches'
+              )
+            : React.createElement('div', null,
+                filteredLinked.map(c =>
+                  React.createElement('div', {key:c.id, style:{
+                    padding:'12px 16px', borderBottom:'1px solid #f8fafc',
+                    display:'flex', alignItems:'flex-start', gap:'12px'
+                  }},
+                    React.createElement('div', {style:{
+                      width:'36px', height:'36px', borderRadius:'50%', flexShrink:0,
+                      background:'#EFF6FF', display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize:'14px', fontWeight:700, color:'#1F4E79'
+                    }}, (c.name||c.email||'?').charAt(0).toUpperCase()),
+                    React.createElement('div', {style:{flex:1, minWidth:0}},
+                      React.createElement('div', {style:{fontWeight:600, fontSize:'13px', color:'#1e293b'}}, c.name || '(no name)'),
+                      React.createElement('div', {style:{fontSize:'12px', color:'#64748b'}}, [c.email, c.phone].filter(Boolean).join(' · ')),
+                      React.createElement('div', {style:{marginTop:'5px', display:'flex', alignItems:'center', gap:'6px'}},
+                        React.createElement('span', {style:{fontSize:'11px', color:'#94a3b8', fontWeight:500}}, 'Role:'),
+                        React.createElement('input', {
+                          value: c.role||'',
+                          placeholder:'e.g. Buyer, Decision Maker…',
+                          onChange: e => setLinked(prev => prev.map(x => x.id===c.id ? {...x, role:e.target.value} : x)),
+                          onBlur: e => updateRole(c, e.target.value),
+                          style:{border:'none', borderBottom:'1px dashed #cbd5e1', background:'transparent',
+                            fontSize:'12px', color:'#475569', padding:'1px 4px', outline:'none', width:'200px'}
+                        })
+                      )
+                    ),
+                    React.createElement('button', {
+                      onClick: () => unlinkContact(c),
+                      title: 'Remove link',
+                      style:{background:'none', border:'none', color:'#94a3b8', cursor:'pointer',
+                        fontSize:'16px', padding:'4px', flexShrink:0, lineHeight:1}
+                    }, '×')
+                  )
+                )
+              )
+        )
+      ),
+
+      // ── Company Quotes Modal ──
+      quotesModalOpen && React.createElement('div', {
+        style:{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:1000,
+          display:'flex', alignItems:'center', justifyContent:'center'},
+        onClick: e => { if (e.target === e.currentTarget) setQuotesModalOpen(false); }
+      },
+        React.createElement('div', {style:{
+          background:'#fff', borderRadius:'12px', width:'860px', maxWidth:'96vw',
+          maxHeight:'82vh', display:'flex', flexDirection:'column',
+          boxShadow:'0 24px 64px rgba(0,0,0,0.35)', overflow:'hidden'
+        }},
+          // Header
+          React.createElement('div', {style:{
+            padding:'16px 20px', borderBottom:'1px solid #e2e8f0',
+            display:'flex', alignItems:'center', justifyContent:'space-between',
+            background:'#f8fafc'
+          }},
+            React.createElement('div', null,
+              React.createElement('h3', {style:{fontSize:'15px', fontWeight:700, color:'#1e293b', margin:0}},
+                `📋 Quotes — ${selected?.name}`),
+              React.createElement('div', {style:{fontSize:'12px', color:'#94a3b8', marginTop:'2px'}},
+                `${quotesModalData.length} quote${quotesModalData.length !== 1 ? 's' : ''} linked`)
+            ),
+            React.createElement('button', {
+              onClick: () => setQuotesModalOpen(false),
+              style:{background:'none', border:'none', fontSize:'22px', cursor:'pointer', color:'#94a3b8', lineHeight:1}
+            }, '×')
+          ),
+          // Column headers
+          React.createElement('div', {style:{
+            display:'grid', gridTemplateColumns:'90px 90px 1fr 1fr 90px 90px',
+            padding:'6px 20px', background:'#f1f5f9', borderBottom:'1px solid #e2e8f0',
+            fontSize:'10px', fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em'
+          }},
+            React.createElement('div', null, 'Date'),
+            React.createElement('div', null, 'Source'),
+            React.createElement('div', null, 'Job / Subject'),
+            React.createElement('div', null, 'Customer'),
+            React.createElement('div', null, 'Status'),
+            React.createElement('div', {style:{textAlign:'right'}}, 'Amount')
+          ),
+          // Rows
+          React.createElement('div', {style:{flex:1, overflowY:'auto'}},
+            quotesModalLoading
+              ? React.createElement('div', {style:{padding:'30px', textAlign:'center', color:'#94a3b8'}}, 'Loading…')
+              : quotesModalData.length === 0
+                ? React.createElement('div', {style:{padding:'30px', textAlign:'center', color:'#94a3b8', fontSize:'14px'}},
+                    'No quotes linked to this account yet.')
+                : quotesModalData.map((q, i) => {
+                    const sourceColors = {
+                      RMAX:      {bg:'#eff6ff', color:'#1d4ed8'},
+                      Hydrotech: {bg:'#f0fdf4', color:'#15803d'},
+                      Glassworks:{bg:'#fff7ed', color:'#c2410c'},
+                    };
+                    const sc = sourceColors[q.source] || {bg:'#f8fafc', color:'#64748b'};
+                    const statusColors = {Won:'#166534', Verbal:'#854d0e', Lost:'#991b1b', 'Not Awarded':'#9a3412'};
+                    return React.createElement('div', {
+                      key: q.source + '-' + q.id,
+                      style:{
+                        display:'grid', gridTemplateColumns:'90px 90px 1fr 1fr 90px 90px',
+                        padding:'9px 20px', borderBottom:'1px solid #f0f4f8',
+                        background: i % 2 === 0 ? '#fff' : '#f8fafc',
+                        alignItems:'center', fontSize:'12px'
+                      }
+                    },
+                      React.createElement('div', {style:{color:'#64748b'}}, q.date_received || '—'),
+                      React.createElement('div', null,
+                        React.createElement('span', {style:{
+                          background: sc.bg, color: sc.color,
+                          borderRadius:'4px', padding:'2px 7px', fontWeight:600, fontSize:'11px'
+                        }}, q.source)
+                      ),
+                      React.createElement('div', {style:{color:'#1e293b', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', paddingRight:'8px'}},
+                        q.job_name || q.subject || '—'),
+                      React.createElement('div', {style:{color:'#475569', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', paddingRight:'8px'}},
+                        q.customer || '—'),
+                      React.createElement('div', null,
+                        React.createElement('span', {style:{
+                          fontSize:'11px', fontWeight:600, padding:'2px 6px', borderRadius:'4px',
+                          color: statusColors[q.status] || '#475569',
+                          background: q.status === 'Won' ? '#dcfce7' : q.status === 'Lost' ? '#fee2e2'
+                            : q.status === 'Verbal' ? '#fef9c3' : '#f1f5f9'
+                        }}, q.status || '—')
+                      ),
+                      React.createElement('div', {style:{textAlign:'right', fontWeight:700, color: q.status === 'Won' ? '#16a34a' : '#1e293b'}},
+                        q.amount != null ? '$' + Number(q.amount).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) : '—')
+                    );
+                  })
+          )
+        )
+      ),
+
+      // ── Create Contact Modal ──
+      createContactOpen && React.createElement('div', {
+        style:{position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:1000,
+          display:'flex', alignItems:'center', justifyContent:'center'},
+        onClick: e => { if (e.target === e.currentTarget) setCreateContactOpen(false); }
+      },
+        React.createElement('div', {style:{
+          background:'#fff', borderRadius:'12px', width:'420px', maxWidth:'95vw',
+          boxShadow:'0 20px 60px rgba(0,0,0,0.3)', overflow:'hidden'
+        }},
+          React.createElement('div', {style:{padding:'16px 20px', borderBottom:'1px solid #e2e8f0', display:'flex', alignItems:'center', justifyContent:'space-between'}},
+            React.createElement('h3', {style:{fontSize:'15px', fontWeight:700, color:'#1e293b', margin:0}}, '✚ New Contact'),
+            React.createElement('button', {onClick:()=>setCreateContactOpen(false),
+              style:{background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#94a3b8', lineHeight:1}}, '×')
+          ),
+          React.createElement('div', {style:{padding:'16px 20px', display:'flex', flexDirection:'column', gap:'12px'}},
+            React.createElement('div', null,
+              React.createElement('label', {style:{display:'block', fontSize:'12px', fontWeight:600, color:'#374151', marginBottom:'4px'}}, 'Name *'),
+              React.createElement('input', {
+                type:'text', autoFocus:true,
+                value:createContactForm.name,
+                onChange: e => setCreateContactForm(f => ({...f, name:e.target.value})),
+                style:{...inp}
+              })
+            ),
+            React.createElement('div', null,
+              React.createElement('label', {style:{display:'block', fontSize:'12px', fontWeight:600, color:'#374151', marginBottom:'4px'}}, 'Email'),
+              React.createElement('input', {
+                type:'email',
+                value:createContactForm.email,
+                onChange: e => setCreateContactForm(f => ({...f, email:e.target.value})),
+                style:{...inp}
+              })
+            ),
+            React.createElement('div', null,
+              React.createElement('label', {style:{display:'block', fontSize:'12px', fontWeight:600, color:'#374151', marginBottom:'4px'}}, 'Phone'),
+              React.createElement('input', {
+                type:'tel',
+                value:createContactForm.phone,
+                onChange: e => setCreateContactForm(f => ({...f, phone:e.target.value})),
+                style:{...inp}
+              })
+            ),
+            React.createElement('div', null,
+              React.createElement('label', {style:{display:'block', fontSize:'12px', fontWeight:600, color:'#374151', marginBottom:'4px'}}, 'Role at this company'),
+              React.createElement('input', {
+                type:'text',
+                value:createContactForm.role,
+                placeholder:'e.g. Buyer, Decision Maker…',
+                onChange: e => setCreateContactForm(f => ({...f, role:e.target.value})),
+                style:{...inp}
+              })
+            )
+          ),
+          React.createElement('div', {style:{padding:'12px 20px', borderTop:'1px solid #e2e8f0', display:'flex', justifyContent:'flex-end', gap:'8px'}},
+            React.createElement('button', {
+              onClick:()=>setCreateContactOpen(false),
+              style:{background:'none', border:'1px solid #e2e8f0', borderRadius:'6px',
+                padding:'6px 14px', fontSize:'13px', cursor:'pointer', color:'#64748b'}
+            }, 'Cancel'),
+            React.createElement('button', {
+              onClick: createAndLinkContact,
+              disabled: !createContactForm.name.trim() || createContactSaving,
+              style:{
+                background: !createContactForm.name.trim() || createContactSaving ? '#94a3b8' : '#059669',
+                color:'#fff', border:'none', borderRadius:'6px', padding:'6px 14px',
+                fontSize:'13px', fontWeight:600,
+                cursor: !createContactForm.name.trim() || createContactSaving ? 'default' : 'pointer'
+              }
+            }, createContactSaving ? 'Saving…' : 'Create & Link')
+          )
+        )
+      ),
+
+      // ── Contact Picker Modal ──
+      pickerOpen && React.createElement('div', {
+        style:{position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:1000,
+          display:'flex', alignItems:'center', justifyContent:'center'},
+        onClick: e => { if (e.target === e.currentTarget) setPickerOpen(false); }
+      },
+        React.createElement('div', {style:{
+          background:'#fff', borderRadius:'12px', width:'480px', maxWidth:'95vw',
+          maxHeight:'75vh', display:'flex', flexDirection:'column',
+          boxShadow:'0 20px 60px rgba(0,0,0,0.3)', overflow:'hidden'
+        }},
+          // Modal header
+          React.createElement('div', {style:{padding:'16px 20px', borderBottom:'1px solid #e2e8f0', display:'flex', alignItems:'center', justifyContent:'space-between'}},
+            React.createElement('h3', {style:{fontSize:'15px', fontWeight:700, color:'#1e293b', margin:0}}, 'Link a Contact'),
+            React.createElement('button', {onClick:()=>setPickerOpen(false),
+              style:{background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#94a3b8', lineHeight:1}}, '×')
+          ),
+          // Search
+          React.createElement('div', {style:{padding:'12px 20px', borderBottom:'1px solid #f0f4f8'}},
+            React.createElement('input', {
+              autoFocus:true, placeholder:'Search by name, company, or email…',
+              value:pickerSearch, onChange: e => setPickerSearch(e.target.value),
+              style:{...inp}
+            })
+          ),
+          // Results
+          React.createElement('div', {style:{flex:1, overflowY:'auto'}},
+            availableContacts.length === 0
+              ? React.createElement('div', {style:{padding:'24px', textAlign:'center', color:'#94a3b8', fontSize:'13px'}},
+                  allContacts.length === linked.length ? 'All contacts already linked' : 'No matches'
+                )
+              : availableContacts.map(c =>
+                  React.createElement('div', {
+                    key:c.id,
+                    onClick: () => linkContact(c),
+                    style:{padding:'10px 20px', cursor:'pointer', borderBottom:'1px solid #f8fafc',
+                      display:'flex', alignItems:'center', gap:'12px'}
+                  },
+                    React.createElement('div', {style:{
+                      width:'32px', height:'32px', borderRadius:'50%', flexShrink:0,
+                      background:'#EFF6FF', display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize:'13px', fontWeight:700, color:'#1F4E79'
+                    }}, (c.name||c.email||'?').charAt(0).toUpperCase()),
+                    React.createElement('div', null,
+                      React.createElement('div', {style:{fontWeight:600, fontSize:'13px', color:'#1e293b'}}, c.name || '(no name)'),
+                      React.createElement('div', {style:{fontSize:'12px', color:'#64748b'}},
+                        [c.company, c.email].filter(Boolean).join(' · '))
+                    )
+                  )
+                )
+          )
+        )
+      )
     )
   );
 }
@@ -1991,14 +3118,23 @@ function App() {
             React.createElement('div', {className:'text-base sm:text-lg font-bold tracking-tight leading-none'}, 'SPECFORM SalesPartner')
           )
         ),
-        // Customer Directory button — far right of blue header
-        React.createElement('button', {
-          onClick: () => setTab('directory'),
-          className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
-          style: tab === 'directory'
-            ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
-            : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
-        }, '👥 Customer Directory')
+        // Header buttons — far right of blue header
+        React.createElement('div', {style:{display:'flex', gap:'8px', alignItems:'center'}},
+          React.createElement('button', {
+            onClick: () => setTab('directory'),
+            className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+            style: tab === 'directory'
+              ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
+              : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
+          }, '👥 Customer Directory'),
+          React.createElement('button', {
+            onClick: () => setTab('companies'),
+            className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+            style: tab === 'companies'
+              ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
+              : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
+          }, '🏢 Company Accounts')
+        )
       )
     ),
 
@@ -2044,6 +3180,7 @@ function App() {
       : tab === 'glassworks-dashboard'? React.createElement(Dashboard, {key:'gw-dash',      cfg: GLASSWORKS_CFG})
       : tab === 'sales'               ? React.createElement(SalesTab)
       : tab === 'directory'           ? React.createElement(CustomerDirectory, {key:'dir'})
+      : tab === 'companies'           ? React.createElement(CompanyAccounts, {key:'companies'})
       : tab === 'hydrotech'           ? React.createElement(QuoteList, {
           key: 'hydrotech',
           refresh,

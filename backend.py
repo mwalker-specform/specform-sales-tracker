@@ -2050,19 +2050,30 @@ def list_contacts(
     search:       Optional[str] = Query(None),
 ):
     with get_db() as con:
-        sql = "SELECT * FROM contacts WHERE 1=1"
+        sql = """
+            SELECT ct.*,
+                   co.id   AS linked_company_id,
+                   co.name AS linked_company_name
+            FROM contacts ct
+            LEFT JOIN (
+                SELECT contact_id, MIN(company_id) AS company_id
+                FROM company_contacts GROUP BY contact_id
+            ) cc ON cc.contact_id = ct.id
+            LEFT JOIN companies co ON co.id = cc.company_id
+            WHERE 1=1
+        """
         params = []
         if product_line and product_line != 'All':
-            sql += " AND (product_line = ? OR product_line = 'Both')"
+            sql += " AND (ct.product_line = ? OR ct.product_line = 'Both')"
             params.append(product_line)
         if location and location != 'All':
-            sql += " AND location = ?"
+            sql += " AND ct.location = ?"
             params.append(location)
         if search:
-            sql += " AND (name LIKE ? OR company LIKE ? OR email LIKE ? OR location LIKE ? OR phone LIKE ?)"
+            sql += " AND (ct.name LIKE ? OR ct.company LIKE ? OR ct.email LIKE ? OR ct.location LIKE ? OR ct.phone LIKE ?)"
             s = f"%{search}%"
             params += [s, s, s, s, s]
-        sql += " ORDER BY COALESCE(NULLIF(location,''),'zzz'), COALESCE(NULLIF(name,''),'zzz'), email"
+        sql += " ORDER BY COALESCE(NULLIF(ct.location,''),'zzz'), COALESCE(NULLIF(ct.name,''),'zzz'), ct.email"
         return [dict(r) for r in con.execute(sql, params).fetchall()]
 
 @app.post("/api/contacts", status_code=201)
