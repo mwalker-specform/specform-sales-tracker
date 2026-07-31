@@ -2023,6 +2023,9 @@ function CompanyAccounts() {
   const [pickerSearch,        setPickerSearch]        = useState('');
   const [quoteStats,          setQuoteStats]          = useState(null);
   const [statsPeriod,         setStatsPeriod]         = useState('all');
+  const [quotesModalOpen,     setQuotesModalOpen]     = useState(false);
+  const [quotesModalData,     setQuotesModalData]     = useState([]);
+  const [quotesModalLoading,  setQuotesModalLoading]  = useState(false);
   const [createContactOpen,   setCreateContactOpen]   = useState(false);
   const [createContactForm,   setCreateContactForm]   = useState({name:'',email:'',phone:'',role:''});
   const [createContactSaving, setCreateContactSaving] = useState(false);
@@ -2599,13 +2602,28 @@ function CompanyAccounts() {
           // Stat boxes
           quoteStats
             ? React.createElement('div', {style:{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0', borderTop:'none'}},
-                React.createElement('div', {style:{padding:'16px 20px', borderRight:'1px solid #f0f4f8'}},
+                React.createElement('div', {
+                  style:{padding:'16px 20px', borderRight:'1px solid #f0f4f8', cursor:'pointer',
+                    transition:'background 0.15s'},
+                  title:'Click to view all quotes',
+                  onMouseEnter: e => e.currentTarget.style.background='#f8fafc',
+                  onMouseLeave: e => e.currentTarget.style.background='',
+                  onClick: () => {
+                    setQuotesModalOpen(true);
+                    setQuotesModalLoading(true);
+                    apiFetch(`/api/companies/${selected.id}/quotes`)
+                      .then(data => { setQuotesModalData(data); setQuotesModalLoading(false); })
+                      .catch(() => setQuotesModalLoading(false));
+                  }
+                },
                   React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}}, '📋 Quoted'),
                   React.createElement('div', {style:{fontSize:'24px', fontWeight:700, color:'#1e293b'}},
                     '$' + (quoteStats.total_quoted || 0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
                   ),
-                  React.createElement('div', {style:{fontSize:'12px', color:'#94a3b8', marginTop:'3px'}},
-                    `${quoteStats.quote_count} quote${quoteStats.quote_count !== 1 ? 's' : ''}`)
+                  React.createElement('div', {style:{fontSize:'12px', color:'#94a3b8', marginTop:'3px', display:'flex', alignItems:'center', gap:'4px'}},
+                    `${quoteStats.quote_count} quote${quoteStats.quote_count !== 1 ? 's' : ''}`,
+                    React.createElement('span', {style:{fontSize:'10px', color:'#93c5fd'}}, '↗ view')
+                  )
                 ),
                 React.createElement('div', {style:{padding:'16px 20px', background:'#f0fdf4'}},
                   React.createElement('div', {style:{fontSize:'11px', fontWeight:600, color:'#166534', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px'}}, '🏆 Won'),
@@ -2690,6 +2708,98 @@ function CompanyAccounts() {
                   )
                 )
               )
+        )
+      ),
+
+      // ── Company Quotes Modal ──
+      quotesModalOpen && React.createElement('div', {
+        style:{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:1000,
+          display:'flex', alignItems:'center', justifyContent:'center'},
+        onClick: e => { if (e.target === e.currentTarget) setQuotesModalOpen(false); }
+      },
+        React.createElement('div', {style:{
+          background:'#fff', borderRadius:'12px', width:'860px', maxWidth:'96vw',
+          maxHeight:'82vh', display:'flex', flexDirection:'column',
+          boxShadow:'0 24px 64px rgba(0,0,0,0.35)', overflow:'hidden'
+        }},
+          // Header
+          React.createElement('div', {style:{
+            padding:'16px 20px', borderBottom:'1px solid #e2e8f0',
+            display:'flex', alignItems:'center', justifyContent:'space-between',
+            background:'#f8fafc'
+          }},
+            React.createElement('div', null,
+              React.createElement('h3', {style:{fontSize:'15px', fontWeight:700, color:'#1e293b', margin:0}},
+                `📋 Quotes — ${selected?.name}`),
+              React.createElement('div', {style:{fontSize:'12px', color:'#94a3b8', marginTop:'2px'}},
+                `${quotesModalData.length} quote${quotesModalData.length !== 1 ? 's' : ''} linked`)
+            ),
+            React.createElement('button', {
+              onClick: () => setQuotesModalOpen(false),
+              style:{background:'none', border:'none', fontSize:'22px', cursor:'pointer', color:'#94a3b8', lineHeight:1}
+            }, '×')
+          ),
+          // Column headers
+          React.createElement('div', {style:{
+            display:'grid', gridTemplateColumns:'90px 90px 1fr 1fr 90px 90px',
+            padding:'6px 20px', background:'#f1f5f9', borderBottom:'1px solid #e2e8f0',
+            fontSize:'10px', fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em'
+          }},
+            React.createElement('div', null, 'Date'),
+            React.createElement('div', null, 'Source'),
+            React.createElement('div', null, 'Job / Subject'),
+            React.createElement('div', null, 'Customer'),
+            React.createElement('div', null, 'Status'),
+            React.createElement('div', {style:{textAlign:'right'}}, 'Amount')
+          ),
+          // Rows
+          React.createElement('div', {style:{flex:1, overflowY:'auto'}},
+            quotesModalLoading
+              ? React.createElement('div', {style:{padding:'30px', textAlign:'center', color:'#94a3b8'}}, 'Loading…')
+              : quotesModalData.length === 0
+                ? React.createElement('div', {style:{padding:'30px', textAlign:'center', color:'#94a3b8', fontSize:'14px'}},
+                    'No quotes linked to this account yet.')
+                : quotesModalData.map((q, i) => {
+                    const sourceColors = {
+                      RMAX:      {bg:'#eff6ff', color:'#1d4ed8'},
+                      Hydrotech: {bg:'#f0fdf4', color:'#15803d'},
+                      Glassworks:{bg:'#fff7ed', color:'#c2410c'},
+                    };
+                    const sc = sourceColors[q.source] || {bg:'#f8fafc', color:'#64748b'};
+                    const statusColors = {Won:'#166534', Verbal:'#854d0e', Lost:'#991b1b', 'Not Awarded':'#9a3412'};
+                    return React.createElement('div', {
+                      key: q.source + '-' + q.id,
+                      style:{
+                        display:'grid', gridTemplateColumns:'90px 90px 1fr 1fr 90px 90px',
+                        padding:'9px 20px', borderBottom:'1px solid #f0f4f8',
+                        background: i % 2 === 0 ? '#fff' : '#f8fafc',
+                        alignItems:'center', fontSize:'12px'
+                      }
+                    },
+                      React.createElement('div', {style:{color:'#64748b'}}, q.date_received || '—'),
+                      React.createElement('div', null,
+                        React.createElement('span', {style:{
+                          background: sc.bg, color: sc.color,
+                          borderRadius:'4px', padding:'2px 7px', fontWeight:600, fontSize:'11px'
+                        }}, q.source)
+                      ),
+                      React.createElement('div', {style:{color:'#1e293b', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', paddingRight:'8px'}},
+                        q.job_name || q.subject || '—'),
+                      React.createElement('div', {style:{color:'#475569', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', paddingRight:'8px'}},
+                        q.customer || '—'),
+                      React.createElement('div', null,
+                        React.createElement('span', {style:{
+                          fontSize:'11px', fontWeight:600, padding:'2px 6px', borderRadius:'4px',
+                          color: statusColors[q.status] || '#475569',
+                          background: q.status === 'Won' ? '#dcfce7' : q.status === 'Lost' ? '#fee2e2'
+                            : q.status === 'Verbal' ? '#fef9c3' : '#f1f5f9'
+                        }}, q.status || '—')
+                      ),
+                      React.createElement('div', {style:{textAlign:'right', fontWeight:700, color: q.status === 'Won' ? '#16a34a' : '#1e293b'}},
+                        q.amount != null ? '$' + Number(q.amount).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) : '—')
+                    );
+                  })
+          )
         )
       ),
 
