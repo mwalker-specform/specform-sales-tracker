@@ -3106,6 +3106,71 @@ function LoginForm({ onLogin }) {
   );
 }
 
+// ── Change Password Modal ─────────────────────────────────────────────────────
+function ChangePasswordModal({ onClose }) {
+  const [current, setCurrent]   = useState('');
+  const [next,    setNext]      = useState('');
+  const [confirm, setConfirm]   = useState('');
+  const [err,     setErr]       = useState('');
+  const [ok,      setOk]        = useState(false);
+  const [busy,    setBusy]      = useState(false);
+
+  function submit(e) {
+    e.preventDefault();
+    setErr('');
+    if (next.length < 8)           { setErr('New password must be at least 8 characters.'); return; }
+    if (next !== confirm)          { setErr('New passwords do not match.'); return; }
+    setBusy(true);
+    apiFetch('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: current, new_password: next })
+    })
+      .then(() => setOk(true))
+      .catch(e => setErr(e.message || 'Failed to change password.'))
+      .finally(() => setBusy(false));
+  }
+
+  const overlay = { position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:1000,
+    display:'flex', alignItems:'center', justifyContent:'center' };
+  const box = { background:'#fff', borderRadius:'12px', padding:'28px 32px',
+    width:'100%', maxWidth:'400px', boxShadow:'0 8px 32px rgba(0,0,0,0.18)' };
+  const inp = { width:'100%', padding:'8px 10px', border:'1px solid #d1d5db',
+    borderRadius:'6px', fontSize:'14px', boxSizing:'border-box', marginTop:'4px' };
+  const btn = (primary) => ({
+    padding:'9px 20px', borderRadius:'7px', fontWeight:700, fontSize:'14px', cursor:'pointer',
+    border:'none', background: primary ? '#1F4E79' : '#e5e7eb', color: primary ? '#fff' : '#374151'
+  });
+
+  return React.createElement('div', { style: overlay, onClick: e => e.target === e.currentTarget && onClose() },
+    React.createElement('div', { style: box },
+      React.createElement('h3', { style:{margin:'0 0 20px', fontSize:'18px', fontWeight:700, color:'#1F4E79'} },
+        '🔑 Change Password'),
+      ok
+        ? React.createElement('div', null,
+            React.createElement('p', { style:{color:'#16a34a', fontWeight:600, marginBottom:'16px'} },
+              '✓ Password updated successfully.'),
+            React.createElement('button', { style: btn(true), onClick: onClose }, 'Done'))
+        : React.createElement('form', { onSubmit: submit },
+            React.createElement('label', { style:{fontSize:'13px', fontWeight:600, color:'#374151'} }, 'Current password'),
+            React.createElement('input', { type:'password', required:true, value:current, style:inp,
+              onChange: e => setCurrent(e.target.value) }),
+            React.createElement('label', { style:{fontSize:'13px', fontWeight:600, color:'#374151', display:'block', marginTop:'12px'} },
+              'New password'),
+            React.createElement('input', { type:'password', required:true, value:next, style:inp,
+              onChange: e => setNext(e.target.value) }),
+            React.createElement('label', { style:{fontSize:'13px', fontWeight:600, color:'#374151', display:'block', marginTop:'12px'} },
+              'Confirm new password'),
+            React.createElement('input', { type:'password', required:true, value:confirm, style:inp,
+              onChange: e => setConfirm(e.target.value) }),
+            err && React.createElement('p', { style:{color:'#dc2626', fontSize:'13px', margin:'10px 0 0'} }, err),
+            React.createElement('div', { style:{display:'flex', gap:'10px', marginTop:'20px', justifyContent:'flex-end'} },
+              React.createElement('button', { type:'button', style: btn(false), onClick: onClose }, 'Cancel'),
+              React.createElement('button', { type:'submit',  style: btn(true),  disabled: busy },
+                busy ? 'Saving…' : 'Change Password')))
+    )
+  );
+}
+
 // ── User management (admin only) ──────────────────────────────────────────────
 function UsersAdmin() {
   const [users,       setUsers]       = useState([]);
@@ -3117,6 +3182,7 @@ function UsersAdmin() {
   const [resetPass,   setResetPass]   = useState('');
   const [saving,      setSaving]      = useState(false);
   const [msg,         setMsg]         = useState('');
+  const [welcoming,   setWelcoming]   = useState({});   // {userId: 'sending'|'sent'|'error'}
 
   function load() {
     apiFetch('/api/admin/users').then(data => setUsers(data || [])).catch(()=>{});
@@ -3169,6 +3235,18 @@ function UsersAdmin() {
     if (!confirm(`Remove ${u.email}? This cannot be undone.`)) return;
     await apiFetch(`/api/admin/users/${u.id}`, {method:'DELETE'}).catch(()=>{});
     load(); flash('✓ User removed');
+  }
+
+  async function sendWelcome(u) {
+    setWelcoming(w => ({...w, [u.id]: 'sending'}));
+    try {
+      await apiFetch(`/api/admin/users/${u.id}/send-welcome`, {method:'POST'});
+      setWelcoming(w => ({...w, [u.id]: 'sent'}));
+      flash(`✓ Welcome email sent to ${u.email}`);
+    } catch(err) {
+      setWelcoming(w => ({...w, [u.id]: 'error'}));
+      flash('Email error: ' + err.message);
+    }
   }
 
   const inputCls = 'border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300';
@@ -3269,7 +3347,22 @@ function UsersAdmin() {
               }, u.is_active ? '● Active' : '○ Inactive')
             ),
             React.createElement('td', {className:'px-4 py-3 text-right'},
-              React.createElement('div', {className:'flex gap-2 justify-end'},
+              React.createElement('div', {className:'flex gap-2 justify-end items-center'},
+                (() => {
+                  const ws = welcoming[u.id];
+                  const label = ws === 'sending' ? '…' : ws === 'sent' ? '✓ Sent' : ws === 'error' ? '✗' : '✉ Welcome';
+                  const cls = 'text-xs px-2 py-1 rounded font-medium border ' + (
+                    ws === 'sent'    ? 'bg-green-50 text-green-600 border-green-200' :
+                    ws === 'error'   ? 'bg-red-50 text-red-500 border-red-200' :
+                    ws === 'sending' ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-default' :
+                                       'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
+                  );
+                  return React.createElement('button', {
+                    onClick: ws === 'sending' ? undefined : () => sendWelcome(u),
+                    className: cls,
+                    title: `Send welcome email to ${u.email}`
+                  }, label);
+                })(),
                 React.createElement('button', {
                   onClick:()=>{setResetId(u.id);setResetPass('');},
                   className:'text-xs text-blue-600 hover:underline'
@@ -3335,6 +3428,7 @@ function App() {
   }
   const [tab, setTab]         = useState('sales');
   const [modal, setModal]     = useState(null);
+  const [showChgPw, setShowChgPw] = useState(false);
   const [modalCfg, setModalCfg] = useState(RMAX_CFG);
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -3429,6 +3523,13 @@ function App() {
               ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
               : {background:'rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.7)', border:'1px solid rgba(255,255,255,0.15)'}
           }, '⚙️ Users'),
+          // Change password (all users)
+          React.createElement('button', {
+            onClick: () => setShowChgPw(true),
+            title: 'Change your password',
+            className: 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+            style: {background:'rgba(255,255,255,0.08)', color:'rgba(255,255,255,0.7)', border:'1px solid rgba(255,255,255,0.15)'}
+          }, '🔑 Password'),
           // Logout
           React.createElement('button', {
             onClick: logout,
@@ -3439,6 +3540,9 @@ function App() {
         )
       )
     ),
+
+    // Change Password modal
+    showChgPw && React.createElement(ChangePasswordModal, { onClose: () => setShowChgPw(false) }),
 
     // Nav tabs (only when authenticated)
     user && React.createElement('div', {className:'bg-white border-b shadow-sm'},
