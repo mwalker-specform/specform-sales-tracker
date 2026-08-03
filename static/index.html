@@ -351,13 +351,11 @@ function Dashboard({ cfg = RMAX_CFG }) {
   // Build month lookup and sorted option list
   const monthMap = {};
   (by_month || []).forEach(r => { monthMap[r.month] = r; });
-  // Always include every month of the current year so future months appear in the dropdown
+  // Always include current month; past months only if they have data
+  const _now = new Date();
+  const _currentYM = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}`;
   const _dropdownMonths = new Set((by_month || []).map(r => r.month));
-  const _thisYear = new Date().getFullYear();
-  for (let mo = 1; mo <= 12; mo++) {
-    const ym = `${_thisYear}-${String(mo).padStart(2,'0')}`;
-    _dropdownMonths.add(ym);
-  }
+  _dropdownMonths.add(_currentYM);
   const monthOptions = [..._dropdownMonths].sort().reverse().map(ym => monthMap[ym] || {month: ym});
 
   // Active stats — either a specific month or all-time totals
