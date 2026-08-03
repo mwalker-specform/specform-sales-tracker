@@ -353,7 +353,7 @@ function Dashboard({ cfg = RMAX_CFG }) {
   (by_month || []).forEach(r => { monthMap[r.month] = r; });
   // Always include every month of the current year so future months appear in the dropdown
   const _dropdownMonths = new Set((by_month || []).map(r => r.month));
-  const _thisYear = today.getFullYear();
+  const _thisYear = new Date().getFullYear();
   for (let mo = 1; mo <= 12; mo++) {
     const ym = `${_thisYear}-${String(mo).padStart(2,'0')}`;
     _dropdownMonths.add(ym);
