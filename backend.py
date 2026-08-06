@@ -1821,7 +1821,7 @@ def export_glassworks_quotes():
     )
 
 @app.post("/api/glassworks-quotes/{quote_id}/upload-file")
-async def upload_glassworks_file(quote_id: int, file: UploadFile, token: str = Depends(oauth2_scheme)):
+async def upload_glassworks_file(quote_id: int, file: UploadFile):
     """Attach a file to an existing Glassworks quote."""
     import mimetypes
     os.makedirs(os.path.join(DATA_DIR, 'glassworks_files'), exist_ok=True)
@@ -1836,7 +1836,7 @@ async def upload_glassworks_file(quote_id: int, file: UploadFile, token: str = D
     return {'ok': True, 'file_filename': file_filename}
 
 @app.delete("/api/glassworks-files/{file_id}")
-def delete_glassworks_file(file_id: int, token: str = Depends(oauth2_scheme)):
+def delete_glassworks_file(file_id: int):
     """Delete a file attachment from a Glassworks quote."""
     with get_db() as con:
         row = con.execute('SELECT file_filename FROM glassworks_quote_files WHERE id=?', (file_id,)).fetchone()
