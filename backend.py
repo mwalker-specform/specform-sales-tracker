@@ -236,7 +236,19 @@ def list_quotes(
             params += [s, s, s, s, s]
         sql += " ORDER BY date_received DESC"
         rows = con.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        quotes = [dict(r) for r in rows]
+        if quotes:
+            ids = [q['id'] for q in quotes]
+            file_rows = con.execute(
+                f"SELECT id, quote_id, file_filename FROM glassworks_quote_files WHERE quote_id IN ({{','.join('?'*len(ids))}})",
+                ids
+            ).fetchall()
+            file_map = {}
+            for fr in file_rows:
+                file_map.setdefault(fr['quote_id'], []).append({'id': fr['id'], 'filename': fr['file_filename']})
+            for q in quotes:
+                q['files'] = file_map.get(q['id'], [])
+        return quotes
 
 @app.get("/api/quotes/{quote_id}")
 def get_quote(quote_id: int):
@@ -1637,6 +1649,13 @@ def init_glassworks_db():
                 con.execute(f"ALTER TABLE glassworks_quotes ADD COLUMN {col} {definition}")
             except Exception:
                 pass
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS glassworks_quote_files (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            quote_id      INTEGER NOT NULL,
+            file_filename TEXT NOT NULL,
+            uploaded_at   TEXT DEFAULT (datetime('now'))
+        )""")
 
 @app.get("/api/glassworks-quotes")
 def list_glassworks_quotes(
@@ -1800,6 +1819,46 @@ def export_glassworks_quotes():
         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         headers={'Content-Disposition': f'attachment; filename="{filename}"'}
     )
+
+@app.post("/api/glassworks-quotes/{quote_id}/upload-file")
+async def upload_glassworks_file(quote_id: int, file: UploadFile, token: str = Depends(oauth2_scheme)):
+    """Attach a file to an existing Glassworks quote."""
+    import mimetypes
+    os.makedirs(os.path.join(DATA_DIR, 'glassworks_files'), exist_ok=True)
+    safe_name = ''.join(c if c.isalnum() or c in '._- ' else '_' for c in file.filename)
+    file_filename = f'{quote_id}_{safe_name}'
+    file_path = os.path.join(DATA_DIR, 'glassworks_files', file_filename)
+    contents = await file.read()
+    with open(file_path, 'wb') as f:
+        f.write(contents)
+    with get_db() as con:
+        con.execute('INSERT INTO glassworks_quote_files (quote_id, file_filename) VALUES (?,?)', (quote_id, file_filename))
+    return {'ok': True, 'file_filename': file_filename}
+
+@app.delete("/api/glassworks-files/{file_id}")
+def delete_glassworks_file(file_id: int, token: str = Depends(oauth2_scheme)):
+    """Delete a file attachment from a Glassworks quote."""
+    with get_db() as con:
+        row = con.execute('SELECT file_filename FROM glassworks_quote_files WHERE id=?', (file_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='File not found')
+        file_path = os.path.join(DATA_DIR, 'glassworks_files', row['file_filename'])
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        con.execute('DELETE FROM glassworks_quote_files WHERE id=?', (file_id,))
+    return {'ok': True}
+
+@app.get("/api/glassworks-file/{filename}")
+def serve_glassworks_file(filename: str):
+    """Serve a saved Glassworks quote file attachment."""
+    import mimetypes
+    safe = os.path.basename(filename)
+    file_path = os.path.join(DATA_DIR, 'glassworks_files', safe)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail='File not found')
+    mt = mimetypes.guess_type(safe)[0] or 'application/octet-stream'
+    display_name = safe.split('_', 1)[-1] if '_' in safe else safe
+    return FileResponse(file_path, media_type=mt, filename=display_name)
 
 @app.post("/api/glassworks-sync")
 def glassworks_sync():
