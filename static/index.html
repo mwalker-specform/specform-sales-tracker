@@ -1109,20 +1109,20 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                     F('Notes', q.notes)
                   ) : null,
                   // PDF attachments (Hydrotech only — supports multiple)
-                  cfg.label === 'Hydrotech' ? React.createElement('div', {className:'mt-3'},
+                  (cfg.label === 'Hydrotech' || cfg.label === 'Glassworks') ? React.createElement('div', {className:'mt-3'},
                     // List existing PDFs
-                    (q.pdfs && q.pdfs.length > 0) ? React.createElement('div', {style:{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'6px'}},
-                      q.pdfs.map(pdf => React.createElement('div', {key: pdf.id, style:{display:'flex',alignItems:'center',gap:'4px'}},
+                    ((cfg.label === 'Glassworks' ? (q.files||[]) : (q.pdfs||[])).length > 0) ? React.createElement('div', {style:{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'6px'}},
+                      (cfg.label === 'Glassworks' ? (q.files||[]) : (q.pdfs||[])).map(pdf => React.createElement('div', {key: pdf.id, style:{display:'flex',alignItems:'center',gap:'4px'}},
                         React.createElement('button', {
-                          onClick: e => { e.stopPropagation(); openPdf(`/api/hydrotech-pdf/${encodeURIComponent(pdf.filename)}`); },
+                          onClick: e => { e.stopPropagation(); openPdf(`/api/${cfg.label === 'Glassworks' ? 'glassworks-file' : 'hydrotech-pdf'}/${encodeURIComponent(pdf.filename)}`); },
                           className: 'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium text-white',
                           style: {background:'#16a34a', border:'none', cursor:'pointer'}
                         }, `📄 ${pdf.filename.replace(/^\d+_/, '')}`),
                         React.createElement('button', {
                           onClick: async e => {
                             e.stopPropagation();
-                            if (!confirm('Remove this PDF?')) return;
-                            const r = await fetch(`/api/hydrotech-pdfs/${pdf.id}`, {method:'DELETE', headers:{'Authorization':'Bearer ' + sessionStorage.getItem('auth_token')}});
+                            if (!confirm(`Remove this ${cfg.label === 'Glassworks' ? 'file' : 'PDF'}?`)) return;
+                            const r = await fetch(`/api/${cfg.label === 'Glassworks' ? 'glassworks-files' : 'hydrotech-pdfs'}/${pdf.id}`, {method:'DELETE', headers:{'Authorization':'Bearer ' + sessionStorage.getItem('auth_token')}});
                             if (r.ok) { onRefresh && onRefresh(); }
                           },
                           title: 'Remove PDF',
@@ -1134,7 +1134,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                     // Hidden file input
                     React.createElement('input', {
                       type: 'file',
-                      accept: 'application/pdf',
+                      accept: cfg.label === 'Glassworks' ? '*/*' : 'application/pdf',
                       multiple: true,
                       id: `pdf-upload-${q.id}`,
                       style: {display:'none'},
@@ -1149,7 +1149,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                           for (const file of files) {
                             const fd = new FormData();
                             fd.append('file', file);
-                            await fetch(`/api/hydrotech-quotes/${q.id}/upload-pdf`, {method:'POST', body: fd, headers:{'Authorization':'Bearer ' + token}});
+                            await fetch(`/api/${cfg.label === 'Glassworks' ? 'glassworks-quotes' : 'hydrotech-quotes'}/${q.id}/${cfg.label === 'Glassworks' ? 'upload-file' : 'upload-pdf'}`, {method:'POST', body: fd, headers:{'Authorization':'Bearer ' + token}});
                           }
                           onRefresh && onRefresh();
                         } catch(err) { alert('Upload error: ' + err.message); }
@@ -1162,7 +1162,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                       disabled: pdfUploading[q.id],
                       className: 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium',
                       style: {background:'#f3f4f6', color:'#374151', border:'1px solid #d1d5db', cursor:'pointer'}
-                    }, pdfUploading[q.id] ? '⏳ Uploading…' : '📎 Attach PDF')
+                    }, pdfUploading[q.id] ? '⏳ Uploading…' : cfg.label === 'Glassworks' ? '📎 Attach File' : '📎 Attach PDF')
                   ) : null
                 );
               })
