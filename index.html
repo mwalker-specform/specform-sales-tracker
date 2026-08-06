@@ -119,6 +119,40 @@ async function apiFetch(path, opts={}) {
   return res.json();
 }
 
+// ── Authenticated PDF viewer (opens in new tab) ───────────────────────────────
+async function openPdf(url) {
+  const token = sessionStorage.getItem('auth_token');
+  try {
+    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!res.ok) { alert('Could not open PDF (' + res.status + ')'); return; }
+    const blob   = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    window.open(objUrl, '_blank');
+    setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+  } catch(e) { alert('Error opening PDF: ' + e.message); }
+}
+
+// ── Authenticated file download ───────────────────────────────────────────────
+async function downloadExport(url) {
+  const token = sessionStorage.getItem('auth_token');
+  try {
+    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!res.ok) { alert('Export failed (' + res.status + ') — please try again.'); return; }
+    const blob   = await res.blob();
+    const cd     = res.headers.get('Content-Disposition') || '';
+    const m      = cd.match(/filename[^;=\n]*=['"]?([^'"\n]+)['"]?/);
+    const name   = m ? m[1] : 'export.xlsx';
+    const objUrl = URL.createObjectURL(blob);
+    const a      = document.createElement('a');
+    a.href       = objUrl;
+    a.download   = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+  } catch(e) { alert('Export failed: ' + e.message); }
+}
+
 // ── Status badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
   if (!status) return React.createElement('span', {className:'text-gray-400 text-xs'}, '—');
@@ -317,7 +351,12 @@ function Dashboard({ cfg = RMAX_CFG }) {
   // Build month lookup and sorted option list
   const monthMap = {};
   (by_month || []).forEach(r => { monthMap[r.month] = r; });
-  const monthOptions = [...(by_month || [])].reverse();
+  // Always include current month; past months only if they have data
+  const _now = new Date();
+  const _currentYM = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}`;
+  const _dropdownMonths = new Set((by_month || []).map(r => r.month));
+  _dropdownMonths.add(_currentYM);
+  const monthOptions = [..._dropdownMonths].sort().reverse().map(ym => monthMap[ym] || {month: ym});
 
   // Active stats — either a specific month or all-time totals
   const active = selMonth !== 'all' && monthMap[selMonth]
@@ -799,7 +838,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
         React.createElement('button', {
           className:'btn flex items-center gap-2',
           style:{background:'#16a34a', color:'#fff', border:'none'},
-          onClick: () => { window.location.href = exportUrl; }
+          onClick: () => downloadExport(exportUrl)
         }, '⬇ Export to Excel'),
         React.createElement('button', {
           className:'btn btn-primary flex items-center gap-2',
@@ -1070,23 +1109,20 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                     F('Notes', q.notes)
                   ) : null,
                   // PDF attachments (Hydrotech only — supports multiple)
-                  cfg.label === 'Hydrotech' ? React.createElement('div', {className:'mt-3'},
+                  (cfg.label === 'Hydrotech' || cfg.label === 'Glassworks') ? React.createElement('div', {className:'mt-3'},
                     // List existing PDFs
-                    (q.pdfs && q.pdfs.length > 0) ? React.createElement('div', {style:{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'6px'}},
-                      q.pdfs.map(pdf => React.createElement('div', {key: pdf.id, style:{display:'flex',alignItems:'center',gap:'4px'}},
-                        React.createElement('a', {
-                          href: `/api/hydrotech-pdf/${encodeURIComponent(pdf.filename)}`,
-                          target: '_blank',
-                          rel: 'noopener noreferrer',
-                          onClick: e => e.stopPropagation(),
+                    ((cfg.label === 'Glassworks' ? (q.files||[]) : (q.pdfs||[])).length > 0) ? React.createElement('div', {style:{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'6px'}},
+                      (cfg.label === 'Glassworks' ? (q.files||[]) : (q.pdfs||[])).map(pdf => React.createElement('div', {key: pdf.id, style:{display:'flex',alignItems:'center',gap:'4px'}},
+                        React.createElement('button', {
+                          onClick: e => { e.stopPropagation(); openPdf(`/api/${cfg.label === 'Glassworks' ? 'glassworks-file' : 'hydrotech-pdf'}/${encodeURIComponent(pdf.filename)}`); },
                           className: 'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium text-white',
-                          style: {background:'#16a34a'}
+                          style: {background:'#16a34a', border:'none', cursor:'pointer'}
                         }, `📄 ${pdf.filename.replace(/^\d+_/, '')}`),
                         React.createElement('button', {
                           onClick: async e => {
                             e.stopPropagation();
-                            if (!confirm('Remove this PDF?')) return;
-                            const r = await fetch(`/api/hydrotech-pdfs/${pdf.id}`, {method:'DELETE'});
+                            if (!confirm(`Remove this ${cfg.label === 'Glassworks' ? 'file' : 'PDF'}?`)) return;
+                            const r = await fetch(`/api/${cfg.label === 'Glassworks' ? 'glassworks-files' : 'hydrotech-pdfs'}/${pdf.id}`, {method:'DELETE', headers:{'Authorization':'Bearer ' + sessionStorage.getItem('auth_token')}});
                             if (r.ok) { onRefresh && onRefresh(); }
                           },
                           title: 'Remove PDF',
@@ -1098,7 +1134,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                     // Hidden file input
                     React.createElement('input', {
                       type: 'file',
-                      accept: 'application/pdf',
+                      accept: cfg.label === 'Glassworks' ? '*/*' : 'application/pdf',
                       multiple: true,
                       id: `pdf-upload-${q.id}`,
                       style: {display:'none'},
@@ -1109,10 +1145,11 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                         e.stopPropagation();
                         setPdfUploading(u => ({...u, [q.id]: true}));
                         try {
+                          const token = sessionStorage.getItem('auth_token');
                           for (const file of files) {
                             const fd = new FormData();
                             fd.append('file', file);
-                            await fetch(`/api/hydrotech-quotes/${q.id}/upload-pdf`, {method:'POST', body: fd});
+                            await fetch(`/api/${cfg.label === 'Glassworks' ? 'glassworks-quotes' : 'hydrotech-quotes'}/${q.id}/${cfg.label === 'Glassworks' ? 'upload-file' : 'upload-pdf'}`, {method:'POST', body: fd, headers:{'Authorization':'Bearer ' + token}});
                           }
                           onRefresh && onRefresh();
                         } catch(err) { alert('Upload error: ' + err.message); }
@@ -1125,7 +1162,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                       disabled: pdfUploading[q.id],
                       className: 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium',
                       style: {background:'#f3f4f6', color:'#374151', border:'1px solid #d1d5db', cursor:'pointer'}
-                    }, pdfUploading[q.id] ? '⏳ Uploading…' : '📎 Attach PDF')
+                    }, pdfUploading[q.id] ? '⏳ Uploading…' : cfg.label === 'Glassworks' ? '📎 Attach File' : '📎 Attach PDF')
                   ) : null
                 );
               })
@@ -1149,7 +1186,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
 const PRODUCT_COLORS = {
   'RMAX':                '#1d4ed8',
   'Hydrotech':           '#16a34a',
-  'LAM':                 '#a16207',
+  'LAM':                 '#eab308',
   'Advanced Glassworks': '#7a9cb8',
 };
 
@@ -1373,7 +1410,7 @@ function SalesTab() {
     repData && repData.months.length > 0 && (() => {
       const REP_COLORS = {
         'RMAX':                '#1d4ed8',
-        'LAM':                 '#a16207',
+        'LAM':                 '#eab308',
         'American Hydrotech':  '#16a34a',
         'Advanced Glassworks': '#7a9cb8',
       };
@@ -2376,14 +2413,13 @@ function CompanyAccounts() {
         React.createElement('div', {style:{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px'}},
           React.createElement('h2', {style:{fontSize:'15px', fontWeight:700, color:'#1F4E79', margin:0}}, '🏢 Companies'),
           React.createElement('div', {style:{display:'flex', gap:'5px'}},
-            React.createElement('a', {
-              href: '/api/companies/export',
-              download: 'company_accounts.xlsx',
+            React.createElement('button', {
+              onClick: () => downloadExport('/api/companies/export'),
               title: 'Export all companies + contacts to Excel',
               style:{
                 background:'#16a34a', color:'#fff', border:'none', borderRadius:'6px',
                 padding:'4px 9px', fontSize:'11px', fontWeight:600, cursor:'pointer',
-                textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'3px'
+                display:'inline-flex', alignItems:'center', gap:'3px'
               }
             }, '📥 Export'),
             React.createElement('button', {
@@ -3483,6 +3519,7 @@ function App() {
   const [authChecked,  setAuthChecked]  = useState(false);
   const [splashFading, setSplashFading] = useState(false);
   const [splashGone,   setSplashGone]   = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   React.useEffect(() => {
     const token = sessionStorage.getItem('auth_token');
@@ -3510,6 +3547,15 @@ function App() {
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [showUserMenu]);
+
+  // ── Heartbeat: detect if admin deactivates this account (every 30s) ──────────
+  React.useEffect(() => {
+    if (!user) return;
+    const hb = setInterval(() => {
+      apiFetch('/api/auth/me').catch(() => {}); // 401 handler in apiFetch reloads page
+    }, 30_000);
+    return () => clearInterval(hb);
+  }, [user]);
 
   // ── Inactivity timer: auto-logout after 8 hours of no activity ──────────────
   React.useEffect(() => {
@@ -3552,7 +3598,6 @@ function App() {
   const [tab, setTab]             = useState('sales');
   const [modal, setModal]         = useState(null);
   const [showChgPw, setShowChgPw] = useState(false);
-  const [showUserMenu, setShowUserMenu] = useState(false);
   const [modalCfg, setModalCfg] = useState(RMAX_CFG);
   const [refresh, setRefresh] = useState(0);
   const [syncing, setSyncing] = useState(false);
