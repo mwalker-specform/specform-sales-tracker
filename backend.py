@@ -929,7 +929,7 @@ GRAPH_TENANT_ID     = os.environ.get("GRAPH_TENANT_ID",     "10e8b460-4e9b-4c2b-
 GRAPH_CLIENT_ID     = os.environ.get("GRAPH_CLIENT_ID",     "79b3406d-c46a-4128-912d-4b51c71f43a4")
 GRAPH_CLIENT_SECRET = os.environ.get("GRAPH_CLIENT_SECRET", "")
 GRAPH_USER          = os.environ.get("GRAPH_USER",          "mwalker@specformbc.com")
-GRAPH_FILE_PATH     = os.environ.get("GRAPH_FILE_PATH",     "Desktop/RMAX Weekly Quotes/Grow 2026 - SPECFORM Sales Plan.xlsx")
+GRAPH_FILE_PATH = os.environ.get("GRAPH_FILE_PATH", "Documents/Specform Sales Partner/RMAX Weekly Quotes/Grow 2026 - SPECFORM Sales Plan.xlsx")
 
 _token_cache: dict = {"token": None, "expires_at": 0.0}
 
