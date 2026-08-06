@@ -240,7 +240,7 @@ def list_quotes(
         if quotes:
             ids = [q['id'] for q in quotes]
             file_rows = con.execute(
-                f"SELECT id, quote_id, file_filename FROM glassworks_quote_files WHERE quote_id IN ({{','.join('?'*len(ids))}})",
+                f"SELECT id, quote_id, file_filename FROM glassworks_quote_files WHERE quote_id IN ({','.join('?'*len(ids))})",
                 ids
             ).fetchall()
             file_map = {}
