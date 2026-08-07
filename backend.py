@@ -1678,7 +1678,19 @@ def list_glassworks_quotes(
             params += [s, s, s, s, s]
         sql += " ORDER BY date_received DESC"
         rows = con.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        quotes = [dict(r) for r in rows]
+        if quotes:
+            ids = [q['id'] for q in quotes]
+            file_rows = con.execute(
+                f"SELECT id, quote_id, file_filename FROM glassworks_quote_files WHERE quote_id IN ({','.join('?'*len(ids))})",
+                ids
+            ).fetchall()
+            file_map = {}
+            for fr in file_rows:
+                file_map.setdefault(fr['quote_id'], []).append({'id': fr['id'], 'filename': fr['file_filename']})
+            for q in quotes:
+                q['files'] = file_map.get(q['id'], [])
+        return quotes
 
 @app.get("/api/glassworks-quotes/{quote_id}")
 def get_glassworks_quote(quote_id: int):
