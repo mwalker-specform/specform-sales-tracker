@@ -1114,6 +1114,12 @@ REP_MONTH_SHEETS = [
     ("Apr",   "April per SBC Rep"),
     ("May",   "May per SBC Rep"),
     ("Jun",   "June per SBC Rep"),
+    ("Jul",   "July per SBC Rep"),
+    ("Aug",   "August per SBC Rep"),
+    ("Sep",   "September per SBC Rep"),
+    ("Oct",   "October per SBC Rep"),
+    ("Nov",   "November per SBC Rep"),
+    ("Dec",   "December per SBC Rep"),
 ]
 REP_PRODUCTS = ["RMAX", "LAM", "American Hydrotech", "Advanced Glassworks"]
 
