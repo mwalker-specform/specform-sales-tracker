@@ -1269,9 +1269,11 @@ function SalesTab() {
         if (!sel) return null;
         const colW = Math.floor(72 / products.length) + '%';
 
+        const MONTH_NUMS = {'Jan':1,'Feb':2,'March':3,'April':4,'May':5,'June':6,'July':7,'August':8,'September':9,'October':10,'November':11,'December':12};
+        const selMonthNum = MONTH_NUMS[sel.month] || 1;
         const prodAvg = {};
         products.forEach(p => {
-          prodAvg[p] = Math.round((annual_plan[p] || 0) / 12);
+          prodAvg[p] = selMonthNum ? Math.round((sel.ytd_actual[p] || 0) / selMonthNum) : 0;
         });
 
         const rows = [
