@@ -1271,8 +1271,7 @@ function SalesTab() {
 
         const prodAvg = {};
         products.forEach(p => {
-          const vals = months.map(m => m.mtd_actual[p] || 0).filter(v => v > 0);
-          prodAvg[p] = vals.length ? Math.round(vals.reduce((s,v) => s+v,0) / vals.length) : 0;
+          prodAvg[p] = Math.round((annual_plan[p] || 0) / 12);
         });
 
         const rows = [
