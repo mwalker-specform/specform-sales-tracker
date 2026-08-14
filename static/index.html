@@ -896,6 +896,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
           {key:'close_date',    label:'Close',         w:'8%'},
           {key:'date_received', label:'Received',      w:'8%'},
           {key:'status',        label:'Status',        w:'9%'},
+          {key:'sf',            label:'SF',            w:'5%', right:true},
         ];
         const sorted = [...visibleQuotes].sort((a,b) => {
           let av=a[sortCol], bv=b[sortCol];
@@ -954,6 +955,11 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
                         React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',whiteSpace:'nowrap'}},fmtDateL(q.date_received)),
                         React.createElement('td',{style:{padding:'8px 12px'}},
                           React.createElement('span',{style:{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'99px',background:SB[q.status]||'#f1f5f9',color:SC[q.status]||'#94a3b8',textDecoration:'none',opacity:1,display:'inline-block'}},q.status||'—')
+                        ),
+                        React.createElement('td',{style:{padding:'8px 12px',textAlign:'center'},onClick:e=>e.stopPropagation()},
+                          React.createElement('input',{type:'checkbox',checked:!!q.add_to_salesforce,title:'Add to Salesforce',style:{width:'15px',height:'15px',cursor:'pointer',accentColor:'#1d4ed8'},
+                            onChange:e=>{e.stopPropagation();apiFetch(`${quotesBase}/${q.id}`,{method:'PUT',body:JSON.stringify({...q,add_to_salesforce:e.target.checked?1:0})}).then(()=>load(true));}
+                          })
                         )
                       );
                     })
