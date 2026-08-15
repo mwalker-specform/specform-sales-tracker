@@ -2235,6 +2235,14 @@ def init_contacts_db():
             role        TEXT,
             UNIQUE(company_id, contact_id)
         )""")
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS quote_contractors (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            quote_id   INTEGER NOT NULL,
+            quote_type TEXT NOT NULL,
+            contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+            UNIQUE(quote_id, quote_type, contact_id)
+        )""")
 
 def init_users_db():
     """Create users table and seed initial accounts if they don't exist."""
@@ -2275,6 +2283,42 @@ class ContactIn(BaseModel):
     region:        Optional[str] = None
     notes:         Optional[str] = None
 
+
+
+@app.get("/api/quote-contractors")
+def list_quote_contractors(quote_id: int = Query(...), quote_type: str = Query(...)):
+    with get_db() as con:
+        rows = con.execute("""
+            SELECT qc.id, ct.id as contact_id, ct.name, ct.company, ct.phone, ct.email
+            FROM quote_contractors qc
+            JOIN contacts ct ON ct.id = qc.contact_id
+            WHERE qc.quote_id=? AND qc.quote_type=?
+            ORDER BY ct.name
+        """, (quote_id, quote_type)).fetchall()
+        return [dict(r) for r in rows]
+
+class QuoteContractorIn(BaseModel):
+    quote_id: int
+    quote_type: str
+    contact_id: int
+
+@app.post("/api/quote-contractors", status_code=201)
+def add_quote_contractor(data: QuoteContractorIn):
+    with get_db() as con:
+        try:
+            cur = con.execute(
+                "INSERT INTO quote_contractors (quote_id, quote_type, contact_id) VALUES (?,?,?)",
+                (data.quote_id, data.quote_type, data.contact_id)
+            )
+            return {"id": cur.lastrowid}
+        except Exception:
+            raise HTTPException(409, "Already linked")
+
+@app.delete("/api/quote-contractors/{entry_id}")
+def remove_quote_contractor(entry_id: int):
+    with get_db() as con:
+        con.execute("DELETE FROM quote_contractors WHERE id=?", (entry_id,))
+        return {"ok": True}
 
 @app.get("/api/architects")
 def list_architects():
