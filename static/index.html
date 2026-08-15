@@ -196,6 +196,9 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
   const [companies, setCompanies] = useState([]);
   const [acSearch, setAcSearch] = useState('');
   const [acOpen, setAcOpen]   = useState(false);
+  const [architects, setArchitects] = useState([]);
+  const [archSearch, setArchSearch] = useState('');
+  const [archOpen, setArchOpen]   = useState(false);
 
   const set = (k,v) => setForm(f => ({...f,[k]:v}));
 
@@ -205,6 +208,13 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
       if (quote?.company_id) {
         const linked = cs.find(c => c.id === quote.company_id);
         if (linked) setAcSearch(linked.name);
+      }
+    }).catch(() => {});
+    apiFetch('/api/architects').then(cts => {
+      setArchitects(cts || []);
+      if (quote?.architect_id) {
+        const a = (cts||[]).find(ct => ct.id === quote.architect_id);
+        if (a) setArchSearch(a.name);
       }
     }).catch(() => {});
   }, []);
@@ -217,6 +227,11 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
     set('company_id', co ? co.id : null);
     setAcSearch(co ? co.name : '');
     setAcOpen(false);
+  }
+  function selectArchitect(ct) {
+    set('architect_id', ct ? ct.id : null);
+    setArchSearch(ct ? ct.name : '');
+    setArchOpen(false);
   }
 
   async function save() {
@@ -308,7 +323,55 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
                   ))
               )
             );
-            return [fieldEl, accountField];
+            // Inject "Architect" combobox right after Linked to Account
+            const archFiltered = archSearch
+              ? architects.filter(ct => ct.name.toLowerCase().includes(archSearch.toLowerCase()) || (ct.company||'').toLowerCase().includes(archSearch.toLowerCase()))
+              : architects;
+            const archLinkedName = form.architect_id
+              ? (architects.find(ct => ct.id === form.architect_id)?.name || archSearch)
+              : '';
+            const architectField = React.createElement('div', {key:'architect', className:'col-span-1', style:{position:'relative'}},
+              React.createElement('label', {className:'block text-xs font-medium text-gray-500 mb-1'}, 'Architect'),
+              React.createElement('div', {style:{display:'flex', alignItems:'center', gap:'4px'}},
+                React.createElement('input', {
+                  type:'text',
+                  value: archOpen ? archSearch : (archLinkedName || archSearch),
+                  placeholder: 'Search architects…',
+                  onFocus: () => { setArchOpen(true); setArchSearch(''); },
+                  onChange: e => { setArchSearch(e.target.value); setArchOpen(true); },
+                  onBlur: () => setTimeout(() => setArchOpen(false), 180),
+                  style:{flex:1}
+                }),
+                form.architect_id && React.createElement('button', {
+                  type:'button',
+                  onClick: () => selectArchitect(null),
+                  style:{background:'none', border:'none', color:'#94a3b8', cursor:'pointer',
+                    fontSize:'18px', lineHeight:1, padding:'0 2px', flexShrink:0}
+                }, '×')
+              ),
+              archOpen && React.createElement('div', {
+                style:{position:'absolute', top:'100%', left:0, right:0, zIndex:200,
+                  background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px',
+                  boxShadow:'0 6px 20px rgba(0,0,0,0.12)', maxHeight:'200px', overflowY:'auto', marginTop:'2px'}
+              },
+                archFiltered.length === 0
+                  ? React.createElement('div', {style:{padding:'10px 14px', fontSize:'12px', color:'#94a3b8'}}, architects.length === 0 ? 'No architects in directory yet' : 'No matches')
+                  : archFiltered.map(ct => React.createElement('div', {
+                      key: ct.id,
+                      onMouseDown: () => selectArchitect(ct),
+                      style:{
+                        padding:'8px 14px', cursor:'pointer', fontSize:'13px',
+                        background: form.architect_id === ct.id ? '#EFF6FF' : '#fff',
+                        fontWeight: form.architect_id === ct.id ? 600 : 400,
+                        borderBottom: '1px solid #f8fafc'
+                      }
+                    },
+                    React.createElement('div', {style:{color:'#1e293b'}}, ct.name),
+                    ct.company && React.createElement('div', {style:{fontSize:'11px', color:'#64748b'}}, ct.company)
+                  ))
+              )
+            );
+            return [fieldEl, accountField, architectField];
           }
 
           return [fieldEl];
