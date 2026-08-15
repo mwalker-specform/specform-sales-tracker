@@ -200,7 +200,6 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
   const [archSearch, setArchSearch] = useState('');
   const [archOpen, setArchOpen]   = useState(false);
   const [quoteContractors, setQuoteContractors] = useState([]);
-  const [contractorContacts, setContractorContacts] = useState([]);
   const [ctSearch, setCtSearch] = useState('');
   const [ctOpen, setCtOpen] = useState(false);
   const quoteType = quotesBase.includes('hydrotech') ? 'hydrotech' : quotesBase.includes('glassworks') ? 'glassworks' : 'rmax';
@@ -222,7 +221,6 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
         if (a) setArchSearch(a.name);
       }
     }).catch(() => {});
-    apiFetch('/api/contacts').then(cts => setContractorContacts(cts || [])).catch(() => {});
     if (quote?.id) {
       const qType = quotesBase.includes('hydrotech') ? 'hydrotech' : quotesBase.includes('glassworks') ? 'glassworks' : 'rmax';
       apiFetch(`/api/quote-contractors?quote_id=${quote.id}&quote_type=${qType}`)
@@ -232,11 +230,11 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
 
   async function addContractor(ct) {
     if (!form.id) return;
-    if (quoteContractors.find(qc => qc.contact_id === ct.id)) return;
+    if (quoteContractors.find(qc => qc.company_id === ct.id)) return;
     try {
       const result = await apiFetch('/api/quote-contractors', {method:'POST',
-        body:JSON.stringify({quote_id:form.id, quote_type:quoteType, contact_id:ct.id})});
-      setQuoteContractors(prev => [...prev, {id:result.id, contact_id:ct.id, name:ct.name, company:ct.company}]);
+        body:JSON.stringify({quote_id:form.id, quote_type:quoteType, company_id:ct.id})});
+      setQuoteContractors(prev => [...prev, {id:result.id, company_id:ct.id, name:ct.name}]);
     } catch(e) {}
     setCtSearch(''); setCtOpen(false);
   }
@@ -411,7 +409,7 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
                 key:qc.id,
                 style:{display:'inline-flex',alignItems:'center',gap:'6px',background:'#EFF6FF',border:'1px solid #BFDBFE',borderRadius:'99px',padding:'3px 10px 3px 12px',fontSize:'12px',color:'#1d4ed8'}
               },
-              React.createElement('span', null, qc.name + (qc.company ? ' · '+qc.company : '')),
+              React.createElement('span', null, qc.name),
               React.createElement('button', {type:'button',onClick:()=>removeContractor(qc.id),
                 style:{background:'none',border:'none',cursor:'pointer',color:'#93c5fd',fontSize:'16px',lineHeight:1,padding:0}}, '×')
             ))
@@ -430,22 +428,21 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
               boxShadow:'0 6px 20px rgba(0,0,0,0.12)',maxHeight:'180px',overflowY:'auto',marginTop:'2px'}
           },
             (()=>{
-              const ctF = contractorContacts.filter(ct =>
-                ct.name?.toLowerCase().includes(ctSearch.toLowerCase()) ||
-                (ct.company||'').toLowerCase().includes(ctSearch.toLowerCase())
+              const ctF = companies.filter(co =>
+                co.name?.toLowerCase().includes(ctSearch.toLowerCase())
               );
               return ctF.length === 0
                 ? React.createElement('div', {style:{padding:'10px 14px',fontSize:'12px',color:'#94a3b8'}}, 'No matches')
-                : ctF.map(ct => {
-                    const linked = !!quoteContractors.find(qc=>qc.contact_id===ct.id);
+                : ctF.map(co => {
+                    const linked = !!quoteContractors.find(qc=>qc.company_id===co.id);
                     return React.createElement('div', {
-                      key:ct.id, onMouseDown:()=>addContractor(ct),
+                      key:co.id, onMouseDown:()=>addContractor(co),
                       style:{padding:'8px 14px',cursor:'pointer',fontSize:'13px',
                         background:linked?'#f0fdf4':'#fff',borderBottom:'1px solid #f8fafc'}
                     },
                       React.createElement('div',{style:{color:'#1e293b',fontWeight:linked?600:400}},
-                        (linked?'✓ ':'')+ct.name),
-                      ct.company && React.createElement('div',{style:{fontSize:'11px',color:'#64748b'}},ct.company)
+                        (linked?'✓ ':'')+co.name),
+                      co.region && React.createElement('div',{style:{fontSize:'11px',color:'#64748b'}},co.region)
                     );
                   });
             })()
