@@ -1728,7 +1728,6 @@ function CustomerDirectory() {
   const [adding,      setAdding]      = useState(false);
   const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',region:'',notes:''});
   const [regionFilter, setRegionFilter] = useState('All');
-  const [accountTypeFilter, setAccountTypeFilter] = useState('');
   const [companies,    setCompanies]   = useState([]);
   const [editLinkedCo, setEditLinkedCo] = useState(null);
   const [editCoSearch, setEditCoSearch] = useState('');
@@ -2323,6 +2322,7 @@ function CompanyAccounts() {
   const [saving,        setSaving]        = useState(false);
   const [msg,           setMsg]           = useState('');
   const [regionFilter,  setRegionFilter]  = useState('All');
+  const [accountTypeFilter, setAccountTypeFilter] = useState('');
 
   function loadCompanies(s, r, t) {
     setLoading(true);
