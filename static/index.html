@@ -1728,6 +1728,7 @@ function CustomerDirectory() {
   const [adding,      setAdding]      = useState(false);
   const [newForm,     setNewForm]     = useState({name:'',company:'',phone:'',email:'',location:'',product_line:'RMAX',customer_type:'',region:'',notes:''});
   const [regionFilter, setRegionFilter] = useState('All');
+  const [accountTypeFilter, setAccountTypeFilter] = useState('');
   const [companies,    setCompanies]   = useState([]);
   const [editLinkedCo, setEditLinkedCo] = useState(null);
   const [editCoSearch, setEditCoSearch] = useState('');
@@ -2323,13 +2324,15 @@ function CompanyAccounts() {
   const [msg,           setMsg]           = useState('');
   const [regionFilter,  setRegionFilter]  = useState('All');
 
-  function loadCompanies(s, r) {
+  function loadCompanies(s, r, t) {
     setLoading(true);
     const q  = s !== undefined ? s : search;
     const rf = r !== undefined ? r : regionFilter;
+    const at = t !== undefined ? t : accountTypeFilter;
     const params = [];
     if (q)            params.push(`search=${encodeURIComponent(q)}`);
     if (rf && rf !== 'All') params.push(`region=${encodeURIComponent(rf)}`);
+    if (at)           params.push(`account_type=${encodeURIComponent(at)}`);
     const url = '/api/companies' + (params.length ? '?' + params.join('&') : '');
     apiFetch(url)
       .then(data => { setCompanies(data); setLoading(false); })
@@ -2586,6 +2589,19 @@ function CompanyAccounts() {
           ['Central Texas','Southeast Texas','The Valley'].map(r =>
             React.createElement('option', {key:r, value:r}, r)
           )
+        )
+      ),
+
+      // Account type filter buttons
+      React.createElement('div', {style:{display:'flex', gap:'6px', marginTop:'8px', flexWrap:'wrap'}},
+        ['Distributor','Contractor','Architect','General Contractor'].map(type =>
+          React.createElement('button', {
+            key: type,
+            onClick: () => { const v = accountTypeFilter === type ? '' : type; setAccountTypeFilter(v); loadCompanies(search, regionFilter, v); },
+            style:{padding:'4px 10px', fontSize:'11px', borderRadius:'12px', border:'1px solid #cbd5e1',
+                   background: accountTypeFilter === type ? '#1d4ed8' : '#fff',
+                   color: accountTypeFilter === type ? '#fff' : '#374151', cursor:'pointer'}
+          }, type)
         )
       ),
 
