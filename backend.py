@@ -2235,13 +2235,20 @@ def init_contacts_db():
             role        TEXT,
             UNIQUE(company_id, contact_id)
         )""")
+        # Migration: switch from contact_id to company_id (drop+recreate if old schema)
+        try:
+            cols = [r[1] for r in con.execute("PRAGMA table_info(quote_contractors)").fetchall()]
+            if 'contact_id' in cols and 'company_id' not in cols:
+                con.execute("DROP TABLE IF EXISTS quote_contractors")
+        except Exception:
+            pass
         con.execute("""
         CREATE TABLE IF NOT EXISTS quote_contractors (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             quote_id   INTEGER NOT NULL,
             quote_type TEXT NOT NULL,
-            contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-            UNIQUE(quote_id, quote_type, contact_id)
+            company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            UNIQUE(quote_id, quote_type, company_id)
         )""")
 
 def init_users_db():
@@ -2289,26 +2296,26 @@ class ContactIn(BaseModel):
 def list_quote_contractors(quote_id: int = Query(...), quote_type: str = Query(...)):
     with get_db() as con:
         rows = con.execute("""
-            SELECT qc.id, ct.id as contact_id, ct.name, ct.company, ct.phone, ct.email
+            SELECT qc.id, co.id as company_id, co.name, co.region, co.phone, co.website
             FROM quote_contractors qc
-            JOIN contacts ct ON ct.id = qc.contact_id
+            JOIN companies co ON co.id = qc.company_id
             WHERE qc.quote_id=? AND qc.quote_type=?
-            ORDER BY ct.name
+            ORDER BY co.name
         """, (quote_id, quote_type)).fetchall()
         return [dict(r) for r in rows]
 
 class QuoteContractorIn(BaseModel):
     quote_id: int
     quote_type: str
-    contact_id: int
+    company_id: int
 
 @app.post("/api/quote-contractors", status_code=201)
 def add_quote_contractor(data: QuoteContractorIn):
     with get_db() as con:
         try:
             cur = con.execute(
-                "INSERT INTO quote_contractors (quote_id, quote_type, contact_id) VALUES (?,?,?)",
-                (data.quote_id, data.quote_type, data.contact_id)
+                "INSERT INTO quote_contractors (quote_id, quote_type, company_id) VALUES (?,?,?)",
+                (data.quote_id, data.quote_type, data.company_id)
             )
             return {"id": cur.lastrowid}
         except Exception:
