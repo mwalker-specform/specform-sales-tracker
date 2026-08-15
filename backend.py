@@ -2222,6 +2222,7 @@ def init_contacts_db():
             ("strong_market_partner",     "INTEGER DEFAULT 0"),
             ("large_account_opportunity", "INTEGER DEFAULT 0"),
             ("region",                    "TEXT"),
+            ("account_type",              "TEXT DEFAULT ''"),
         ]:
             try:
                 con.execute(f"ALTER TABLE companies ADD COLUMN {col} {defn}")
@@ -2701,6 +2702,7 @@ class CompanyIn(BaseModel):
     notes:                     Optional[str] = None
     strong_market_partner:     Optional[int] = 0
     large_account_opportunity: Optional[int] = 0
+    account_type:              Optional[str] = None
 
 @app.get("/api/companies")
 def list_companies(search: Optional[str] = Query(None), region: Optional[str] = Query(None)):
@@ -2740,8 +2742,8 @@ def list_companies(search: Optional[str] = Query(None), region: Optional[str] = 
 def create_company(c: CompanyIn):
     with get_db() as con:
         cur = con.execute(
-            "INSERT INTO companies (name,address,phone,website,region,notes,strong_market_partner,large_account_opportunity) VALUES (?,?,?,?,?,?,?,?)",
-            (c.name, c.address, c.phone, c.website, c.region, c.notes, c.strong_market_partner or 0, c.large_account_opportunity or 0)
+            "INSERT INTO companies (name,address,phone,website,region,notes,strong_market_partner,large_account_opportunity,account_type) VALUES (?,?,?,?,?,?,?,?,?)",
+            (c.name, c.address, c.phone, c.website, c.region, c.notes, c.strong_market_partner or 0, c.large_account_opportunity or 0, c.account_type or '')
         )
         return {"id": cur.lastrowid}
 
@@ -2753,10 +2755,10 @@ def update_company(company_id: int, c: CompanyIn):
             raise HTTPException(404, "Company not found")
         con.execute("""
             UPDATE companies SET name=?,address=?,phone=?,website=?,region=?,notes=?,
-                strong_market_partner=?,large_account_opportunity=?,updated_at=datetime('now')
+                strong_market_partner=?,large_account_opportunity=?,account_type=?,updated_at=datetime('now')
             WHERE id=?
         """, (c.name, c.address, c.phone, c.website, c.region, c.notes,
-              c.strong_market_partner or 0, c.large_account_opportunity or 0, company_id))
+              c.strong_market_partner or 0, c.large_account_opportunity or 0, c.account_type or '', company_id))
         return {"ok": True}
 
 @app.delete("/api/companies/{company_id}")
