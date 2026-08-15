@@ -199,6 +199,11 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
   const [architects, setArchitects] = useState([]);
   const [archSearch, setArchSearch] = useState('');
   const [archOpen, setArchOpen]   = useState(false);
+  const [quoteContractors, setQuoteContractors] = useState([]);
+  const [contractorContacts, setContractorContacts] = useState([]);
+  const [ctSearch, setCtSearch] = useState('');
+  const [ctOpen, setCtOpen] = useState(false);
+  const quoteType = quotesBase.includes('hydrotech') ? 'hydrotech' : quotesBase.includes('glassworks') ? 'glassworks' : 'rmax';
 
   const set = (k,v) => setForm(f => ({...f,[k]:v}));
 
@@ -217,8 +222,28 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
         if (a) setArchSearch(a.name);
       }
     }).catch(() => {});
+    apiFetch('/api/contacts').then(cts => setContractorContacts(cts || [])).catch(() => {});
+    if (quote?.id) {
+      const qType = quotesBase.includes('hydrotech') ? 'hydrotech' : quotesBase.includes('glassworks') ? 'glassworks' : 'rmax';
+      apiFetch(`/api/quote-contractors?quote_id=${quote.id}&quote_type=${qType}`)
+        .then(list => setQuoteContractors(list || [])).catch(() => {});
+    }
   }, []);
 
+  async function addContractor(ct) {
+    if (!form.id) return;
+    if (quoteContractors.find(qc => qc.contact_id === ct.id)) return;
+    try {
+      const result = await apiFetch('/api/quote-contractors', {method:'POST',
+        body:JSON.stringify({quote_id:form.id, quote_type:quoteType, contact_id:ct.id})});
+      setQuoteContractors(prev => [...prev, {id:result.id, contact_id:ct.id, name:ct.name, company:ct.company}]);
+    } catch(e) {}
+    setCtSearch(''); setCtOpen(false);
+  }
+  async function removeContractor(entryId) {
+    await apiFetch(`/api/quote-contractors/${entryId}`, {method:'DELETE'});
+    setQuoteContractors(prev => prev.filter(qc => qc.id !== entryId));
+  }
   const acFiltered = acSearch
     ? companies.filter(c => c.name.toLowerCase().includes(acSearch.toLowerCase()))
     : companies;
@@ -376,6 +401,56 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
 
           return [fieldEl];
         })
+      ),
+      form.id && React.createElement('div', {style:{marginTop:'16px',borderTop:'1px solid #e2e8f0',paddingTop:'14px'}},
+        React.createElement('div', {style:{fontSize:'12px',fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'10px'}}, 'Linked Contractors'),
+        React.createElement('div', {style:{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'10px'}},
+          quoteContractors.length === 0
+            ? React.createElement('span', {style:{fontSize:'12px',color:'#94a3b8'}}, 'None linked yet')
+            : quoteContractors.map(qc => React.createElement('div', {
+                key:qc.id,
+                style:{display:'inline-flex',alignItems:'center',gap:'6px',background:'#EFF6FF',border:'1px solid #BFDBFE',borderRadius:'99px',padding:'3px 10px 3px 12px',fontSize:'12px',color:'#1d4ed8'}
+              },
+              React.createElement('span', null, qc.name + (qc.company ? ' · '+qc.company : '')),
+              React.createElement('button', {type:'button',onClick:()=>removeContractor(qc.id),
+                style:{background:'none',border:'none',cursor:'pointer',color:'#93c5fd',fontSize:'16px',lineHeight:1,padding:0}}, '×')
+            ))
+        ),
+        React.createElement('div', {style:{position:'relative'}},
+          React.createElement('input', {
+            type:'text', value:ctSearch, placeholder:'Add contractor…',
+            onChange:e=>{setCtSearch(e.target.value);setCtOpen(true);},
+            onFocus:()=>setCtOpen(true),
+            onBlur:()=>setTimeout(()=>setCtOpen(false),180),
+            style:{width:'100%',fontSize:'13px',border:'1px solid #d1d5db',borderRadius:'8px',padding:'7px 12px',outline:'none',boxSizing:'border-box'}
+          }),
+          ctOpen && ctSearch && React.createElement('div', {
+            style:{position:'absolute',top:'100%',left:0,right:0,zIndex:300,
+              background:'#fff',border:'1px solid #d1d5db',borderRadius:'8px',
+              boxShadow:'0 6px 20px rgba(0,0,0,0.12)',maxHeight:'180px',overflowY:'auto',marginTop:'2px'}
+          },
+            (()=>{
+              const ctF = contractorContacts.filter(ct =>
+                ct.name?.toLowerCase().includes(ctSearch.toLowerCase()) ||
+                (ct.company||'').toLowerCase().includes(ctSearch.toLowerCase())
+              );
+              return ctF.length === 0
+                ? React.createElement('div', {style:{padding:'10px 14px',fontSize:'12px',color:'#94a3b8'}}, 'No matches')
+                : ctF.map(ct => {
+                    const linked = !!quoteContractors.find(qc=>qc.contact_id===ct.id);
+                    return React.createElement('div', {
+                      key:ct.id, onMouseDown:()=>addContractor(ct),
+                      style:{padding:'8px 14px',cursor:'pointer',fontSize:'13px',
+                        background:linked?'#f0fdf4':'#fff',borderBottom:'1px solid #f8fafc'}
+                    },
+                      React.createElement('div',{style:{color:'#1e293b',fontWeight:linked?600:400}},
+                        (linked?'✓ ':'')+ct.name),
+                      ct.company && React.createElement('div',{style:{fontSize:'11px',color:'#64748b'}},ct.company)
+                    );
+                  });
+            })()
+          )
+        )
       ),
       React.createElement('div', {className:'flex justify-end gap-2 mt-6'},
         React.createElement('button', {className:'btn btn-ghost', onClick:onClose}, 'Cancel'),
