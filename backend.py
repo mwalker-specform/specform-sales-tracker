@@ -2705,7 +2705,7 @@ class CompanyIn(BaseModel):
     account_type:              Optional[str] = None
 
 @app.get("/api/companies")
-def list_companies(search: Optional[str] = Query(None), region: Optional[str] = Query(None)):
+def list_companies(search: Optional[str] = Query(None), region: Optional[str] = Query(None), account_type: Optional[str] = Query(None)):
     with get_db() as con:
         sql = """
             SELECT c.*,
@@ -2735,6 +2735,9 @@ def list_companies(search: Optional[str] = Query(None), region: Optional[str] = 
         if region and region != 'All':
             sql += " AND c.region = ?"
             params.append(region)
+        if account_type:
+            sql += " AND c.account_type = ?"
+            params.append(account_type)
         sql += " GROUP BY c.id ORDER BY c.name COLLATE NOCASE"
         return [dict(r) for r in con.execute(sql, params).fetchall()]
 
