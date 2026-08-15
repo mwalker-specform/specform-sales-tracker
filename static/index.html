@@ -1733,7 +1733,7 @@ function CustomerDirectory() {
   const [editCoSearch, setEditCoSearch] = useState('');
   const [newLinkedCo,  setNewLinkedCo]  = useState(null);
   const [newCoSearch,  setNewCoSearch]  = useState('');
-  const CUSTOMER_TYPES = ['','Contractor','Distributor','General Contractor','Architect'];
+  const COMPANY_ACCOUNT_TYPES = ['','Contractor','Distributor','General Contractor','Architect'];
   const REGIONS = ['','Central Texas','Southeast Texas','The Valley'];
 
   useEffect(() => {
@@ -2003,7 +2003,7 @@ function CustomerDirectory() {
           )
         : type==='ctype'
         ? React.createElement('select', {value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), className:cls},
-            CUSTOMER_TYPES.map(v=>React.createElement('option',{key:v||'blank',value:v},v||'— Select type —'))
+            COMPANY_ACCOUNT_TYPES.map(v=>React.createElement('option',{key:v||'blank',value:v},v||'— Select type —'))
           )
         : type==='region'
         ? React.createElement('select', {value:form[key]||'', onChange:e=>setForm(f=>({...f,[key]:e.target.value})), className:cls},
@@ -2305,6 +2305,7 @@ function CompanyAccounts() {
   const [adding,        setAdding]        = useState(false);
   const [newForm,       setNewForm]       = useState({name:'',address:'',phone:'',website:'',region:'',notes:'',strong_market_partner:0,large_account_opportunity:0});
   const COMPANY_REGIONS = ['','Central Texas','Southeast Texas','The Valley'];
+  const COMPANY_ACCOUNT_TYPES = ['','Contractor','Distributor','General Contractor','Architect'];
   const [linked,        setLinked]        = useState([]);     // contacts for selected company
   const [linkSearch,    setLinkSearch]    = useState('');
   const [allContacts,   setAllContacts]   = useState([]);
@@ -2736,7 +2737,7 @@ function CompanyAccounts() {
         fieldRow('Phone', 'phone', newForm, setNewForm),
         fieldRow('Website', 'website', newForm, setNewForm, 'url'),
         selectRow('Region', 'region', newForm, setNewForm, COMPANY_REGIONS),
-        selectRow('Account Type', 'account_type', newForm, setNewForm, CUSTOMER_TYPES),
+        selectRow('Account Type', 'account_type', newForm, setNewForm, COMPANY_ACCOUNT_TYPES),
         fieldRow('Notes', 'notes', newForm, setNewForm, 'textarea'),
         React.createElement('div', {style:{marginTop:'12px', marginBottom:'4px'}},
           checkboxRow('⭐ Strong Market Partner',       'strong_market_partner',     newForm, setNewForm, '#b45309'),
@@ -2779,7 +2780,7 @@ function CompanyAccounts() {
                 fieldRow('Phone', 'phone', editForm, setEditForm),
                 fieldRow('Website', 'website', editForm, setEditForm, 'url'),
                 selectRow('Region', 'region', editForm, setEditForm, COMPANY_REGIONS),
-                selectRow('Account Type', 'account_type', editForm, setEditForm, CUSTOMER_TYPES),
+                selectRow('Account Type', 'account_type', editForm, setEditForm, COMPANY_ACCOUNT_TYPES),
                 fieldRow('Notes', 'notes', editForm, setEditForm, 'textarea'),
                 React.createElement('div', {style:{marginTop:'12px', marginBottom:'4px'}},
                   checkboxRow('⭐ Strong Market Partner',       'strong_market_partner',     editForm, setEditForm, '#b45309'),
