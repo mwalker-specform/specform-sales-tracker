@@ -2594,13 +2594,13 @@ function CompanyAccounts() {
 
       // Account type filter buttons
       React.createElement('div', {style:{display:'flex', gap:'6px', marginTop:'8px', flexWrap:'wrap'}},
-        ['Distributor','Contractor','Architect','General Contractor'].map(type =>
+        ['All','Distributor','Contractor','Architect','General Contractor'].map(type =>
           React.createElement('button', {
             key: type,
-            onClick: () => { const v = accountTypeFilter === type ? '' : type; setAccountTypeFilter(v); loadCompanies(search, regionFilter, v); },
+            onClick: () => { const v = type === 'All' ? '' : (accountTypeFilter === type ? '' : type); setAccountTypeFilter(v); loadCompanies(search, regionFilter, v); },
             style:{padding:'4px 10px', fontSize:'11px', borderRadius:'12px', border:'1px solid #cbd5e1',
-                   background: accountTypeFilter === type ? '#1d4ed8' : '#fff',
-                   color: accountTypeFilter === type ? '#fff' : '#374151', cursor:'pointer'}
+                   background: (type === 'All' ? !accountTypeFilter : accountTypeFilter === type) ? '#1d4ed8' : '#fff',
+                   color: (type === 'All' ? !accountTypeFilter : accountTypeFilter === type) ? '#fff' : '#374151', cursor:'pointer'}
           }, type)
         )
       ),
