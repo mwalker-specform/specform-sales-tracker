@@ -190,6 +190,7 @@ def startup():
     init_db()
     init_hydrotech_db()
     init_glassworks_db()
+    init_lam_db()
     init_contacts_db()
     init_users_db()
     migrate_dates()
@@ -2135,6 +2136,524 @@ def glassworks_dashboard():
             "by_status": [dict(r) for r in by_status],
             "by_close_month": by_close_month_gw,
         }
+
+
+def init_lam_db():
+    with get_db() as con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS lam_quotes (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            status             TEXT,
+            date_received      TEXT,
+            date_quoted        TEXT,
+            sent_to            TEXT,
+            subject            TEXT,
+            job_name           TEXT,
+            customer           TEXT,
+            location           TEXT,
+            product            TEXT,
+            price              TEXT,
+            quantities         TEXT,
+            amount             REAL,
+            close_date         TEXT,
+            est_freight        TEXT,
+            lead_time          TEXT,
+            notes              TEXT,
+            region             TEXT,
+            add_to_salesforce  INTEGER DEFAULT 0,
+            completed          INTEGER DEFAULT 0,
+            deleted            INTEGER DEFAULT 0,
+            created_at         TEXT DEFAULT (datetime('now')),
+            updated_at         TEXT DEFAULT (datetime('now'))
+        )""")
+        for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
+                                 ('completed',         'INTEGER DEFAULT 0'),
+                                 ('completed_date',    'TEXT'),
+                                 ('region',            'TEXT'),
+                                 ('deleted',           'INTEGER DEFAULT 0'),
+                                 ('company_id',        'INTEGER'),
+                                 ('architect_id',      'INTEGER')]:
+            try:
+                con.execute(f"ALTER TABLE lam_quotes ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS lam_quote_files (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            quote_id      INTEGER NOT NULL,
+            file_filename TEXT NOT NULL,
+            uploaded_at   TEXT DEFAULT (datetime('now'))
+        )""")
+
+@app.get("/api/lam-quotes")
+def list_lam_quotes(
+    status:   Optional[str] = Query(None),
+    location: Optional[str] = Query(None),
+    search:   Optional[str] = Query(None),
+):
+    with get_db() as con:
+        sql = "SELECT * FROM lam_quotes WHERE (deleted IS NULL OR deleted=0)"
+        params = []
+        if status and status != "All":
+            sql += " AND status = ?"
+            params.append(status)
+        if location and location != "All":
+            sql += " AND location = ?"
+            params.append(location)
+        if search:
+            sql += " AND (subject LIKE ? OR sent_to LIKE ? OR job_name LIKE ? OR customer LIKE ? OR location LIKE ?)"
+            s = f"%{search}%"
+            params += [s, s, s, s, s]
+        sql += " ORDER BY date_received DESC"
+        rows = con.execute(sql, params).fetchall()
+        quotes = [dict(r) for r in rows]
+        if quotes:
+            ids = [q['id'] for q in quotes]
+            file_rows = con.execute(
+                f"SELECT id, quote_id, file_filename FROM lam_quote_files WHERE quote_id IN ({','.join('?'*len(ids))})",
+                ids
+            ).fetchall()
+            file_map = {}
+            for fr in file_rows:
+                file_map.setdefault(fr['quote_id'], []).append({'id': fr['id'], 'filename': fr['file_filename']})
+            for q in quotes:
+                q['files'] = file_map.get(q['id'], [])
+        return quotes
+
+@app.get("/api/lam-quotes/{quote_id}")
+def get_lam_quote(quote_id: int):
+    with get_db() as con:
+        row = con.execute("SELECT * FROM lam_quotes WHERE id=? AND (deleted IS NULL OR deleted=0)", (quote_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "LAM quote not found")
+        return dict(row)
+
+@app.post("/api/lam-quotes", status_code=201)
+def create_lam_quote(q: QuoteIn):
+    with get_db() as con:
+        cur = con.execute("""
+        INSERT INTO lam_quotes (status,date_received,date_quoted,sent_to,subject,job_name,
+            customer,location,product,price,quantities,amount,close_date,est_freight,lead_time,notes,
+            region,add_to_salesforce,completed,company_id,architect_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
+              q.sent_to,q.subject,q.job_name,
+              q.customer,q.location,q.product,q.price,q.quantities,q.amount,
+              normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
+              q.region,q.add_to_salesforce,q.completed,q.company_id,q.architect_id))
+        return {"id": cur.lastrowid}
+
+@app.put("/api/lam-quotes/{quote_id}")
+def update_lam_quote(quote_id: int, q: QuoteIn):
+    with get_db() as con:
+        existing = con.execute("SELECT completed, completed_date FROM lam_quotes WHERE id=?", (quote_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "LAM quote not found")
+        if q.completed and not existing['completed_date']:
+            completed_date = date.today().strftime('%Y-%m-%d')
+        elif not q.completed:
+            completed_date = None
+        else:
+            completed_date = existing['completed_date']
+        con.execute("""
+        UPDATE lam_quotes SET status=?,date_received=?,date_quoted=?,sent_to=?,subject=?,
+            job_name=?,customer=?,location=?,product=?,price=?,quantities=?,amount=?,
+            close_date=?,est_freight=?,lead_time=?,notes=?,
+            region=?,add_to_salesforce=?,completed=?,completed_date=?,company_id=?,architect_id=?,updated_at=datetime('now')
+        WHERE id=?
+        """, (q.status,normalize_date(q.date_received),normalize_date(q.date_quoted),
+              q.sent_to,q.subject,q.job_name,
+              q.customer,q.location,q.product,q.price,q.quantities,q.amount,
+              normalize_date(q.close_date),q.est_freight,q.lead_time,q.notes,
+              q.region,q.add_to_salesforce,q.completed,completed_date,q.company_id,q.architect_id,quote_id))
+        return {"ok": True}
+
+@app.delete("/api/lam-quotes/{quote_id}")
+def delete_lam_quote(quote_id: int):
+    with get_db() as con:
+        con.execute("UPDATE lam_quotes SET deleted=1 WHERE id=?", (quote_id,))
+        return {"ok": True}
+
+@app.get("/api/lam-quotes-export")
+def export_lam_quotes():
+    """Export all LAM quotes to a formatted Excel file."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from fastapi.responses import StreamingResponse
+    import io
+
+    with get_db() as con:
+        rows = con.execute("""
+            SELECT id, status, date_received, date_quoted, sent_to, subject,
+                   job_name, customer, location, product, price, quantities,
+                   amount, close_date, est_freight, lead_time, notes,
+                   add_to_salesforce, completed
+            FROM lam_quotes WHERE (deleted IS NULL OR deleted=0) ORDER BY date_received DESC
+        """).fetchall()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "LAM Quotes"
+
+    header_font  = Font(name='Calibri', bold=True, color='FFFFFF', size=11)
+    header_fill  = PatternFill('solid', fgColor='0e7490')   # teal for LAM
+    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    border_side  = Side(style='thin', color='BFBFBF')
+    cell_border  = Border(left=border_side, right=border_side,
+                          top=border_side, bottom=border_side)
+    zebra_fill   = PatternFill('solid', fgColor='CFFAFE')
+    STATUS_FILLS = {
+        'Won':    PatternFill('solid', fgColor='D9EAD3'),
+        'Lost':   PatternFill('solid', fgColor='F4CCCC'),
+        'Verbal': PatternFill('solid', fgColor='FFF2CC'),
+    }
+
+    headers = [
+        ('ID', 8), ('Status', 12), ('Date Received', 14), ('Date Quoted', 14),
+        ('Sent To', 22), ('Subject', 30), ('Job Name', 28), ('Customer', 22),
+        ('Location', 18), ('Product', 16), ('Price', 12), ('Quantities', 14),
+        ('Amount', 14), ('Close Date', 14), ('Est. Freight', 14), ('Lead Time', 14),
+        ('Notes', 35), ('Salesforce', 12), ('Completed', 12),
+    ]
+    ws.row_dimensions[1].height = 30
+    for col_idx, (label, width) in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=label)
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = header_align
+        cell.border    = cell_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    ws.freeze_panes = 'A2'
+
+    for row_idx, q in enumerate(rows, start=2):
+        status   = q['status'] or ''
+        row_fill = STATUS_FILLS.get(status, (zebra_fill if row_idx % 2 == 0 else None))
+        values = [
+            q['id'], q['status'], q['date_received'], q['date_quoted'],
+            q['sent_to'], q['subject'], q['job_name'], q['customer'],
+            q['location'], q['product'], q['price'], q['quantities'],
+            q['amount'], q['close_date'], q['est_freight'], q['lead_time'],
+            q['notes'],
+            'Yes' if q['add_to_salesforce'] else '',
+            'Yes' if q['completed'] else '',
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border    = cell_border
+            cell.alignment = Alignment(vertical='top', wrap_text=(col_idx in (6, 7, 17)))
+            if row_fill:
+                cell.fill = row_fill
+            if col_idx == 13 and value is not None:
+                cell.number_format = '$#,##0.00'
+            if col_idx in (1, 2, 18, 19):
+                cell.alignment = Alignment(horizontal='center', vertical='top')
+
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"LAM_Quotes_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+@app.post("/api/lam-quotes/{quote_id}/upload-file")
+async def upload_lam_file(quote_id: int, file: UploadFile):
+    """Attach a file to an existing LAM quote."""
+    import mimetypes
+    os.makedirs(os.path.join(DATA_DIR, 'lam_files'), exist_ok=True)
+    safe_name = ''.join(c if c.isalnum() or c in '._- ' else '_' for c in file.filename)
+    file_filename = f'{quote_id}_{safe_name}'
+    file_path = os.path.join(DATA_DIR, 'lam_files', file_filename)
+    contents = await file.read()
+    with open(file_path, 'wb') as f:
+        f.write(contents)
+    with get_db() as con:
+        con.execute('INSERT INTO lam_quote_files (quote_id, file_filename) VALUES (?,?)', (quote_id, file_filename))
+    return {'ok': True, 'file_filename': file_filename}
+
+@app.delete("/api/lam-files/{file_id}")
+def delete_lam_file(file_id: int):
+    """Delete a file attachment from a LAM quote."""
+    with get_db() as con:
+        row = con.execute('SELECT file_filename FROM lam_quote_files WHERE id=?', (file_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='File not found')
+        file_path = os.path.join(DATA_DIR, 'lam_files', row['file_filename'])
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        con.execute('DELETE FROM lam_quote_files WHERE id=?', (file_id,))
+    return {'ok': True}
+
+@app.get("/api/lam-file/{filename}")
+def serve_lam_file(filename: str):
+    """Serve a saved LAM quote file attachment."""
+    import mimetypes
+    safe = os.path.basename(filename)
+    file_path = os.path.join(DATA_DIR, 'lam_files', safe)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail='File not found')
+    mt = mimetypes.guess_type(safe)[0] or 'application/octet-stream'
+    display_name = safe.split('_', 1)[-1] if '_' in safe else safe
+    return FileResponse(file_path, media_type=mt, filename=display_name)
+
+@app.post("/api/lam-sync")
+def lam_sync():
+    """Pull new emails from 'LAM Quotes' Outlook folder via Graph API."""
+    if not GRAPH_CLIENT_SECRET:
+        return {"inserted": 0, "skipped": 0, "message": "Graph API not configured"}
+
+    try:
+        import requests as _req
+    except ImportError:
+        return {"inserted": 0, "skipped": 0, "message": "requests package not installed"}
+
+    try:
+        token = _get_graph_token()
+    except Exception as e:
+        return {"inserted": 0, "skipped": 0, "message": f"Auth failed: {e}"}
+
+    hdrs = {"Authorization": f"Bearer {token}"}
+
+    folder_id = None
+    for list_url in [
+        f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders?$select=id,displayName&$top=100",
+        f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/mailFolders/Inbox/childFolders?$select=id,displayName&$top=100",
+    ]:
+        try:
+            r = _req.get(list_url, headers=hdrs, timeout=20)
+            if r.status_code == 200:
+                for f in r.json().get("value", []):
+                    if (f.get("displayName") or "").strip().lower() == "lam quotes":
+                        folder_id = f["id"]
+                        break
+            if folder_id:
+                break
+        except Exception:
+            pass
+
+    if not folder_id:
+        return {"inserted": 0, "skipped": 0,
+                "message": "Could not find 'LAM Quotes' folder in Outlook — check folder name"}
+
+    msgs = []
+    next_url = (f"https://graph.microsoft.com/v1.0/users/{GRAPH_USER}"
+                f"/mailFolders/{folder_id}/messages"
+                f"?$select=from,toRecipients,subject,receivedDateTime,body&$top=50")
+    while next_url and len(msgs) < 200:
+        try:
+            r = _req.get(next_url, headers=hdrs, timeout=30)
+            if r.status_code != 200:
+                return {"inserted": 0, "skipped": 0,
+                        "message": f"Graph API error {r.status_code}: {r.text[:200]}"}
+            data = r.json()
+            msgs.extend(data.get("value", []))
+            next_url = data.get("@odata.nextLink")
+        except Exception as e:
+            return {"inserted": 0, "skipped": 0, "message": f"Fetch error: {e}"}
+
+    inserted = updated = skipped = 0
+    with get_db() as con:
+        for msg in msgs:
+            to_recipients = msg.get("toRecipients", [])
+            if to_recipients:
+                first_to = to_recipients[0].get("emailAddress", {})
+                sent_to  = (first_to.get("name") or first_to.get("address") or "").strip()
+            else:
+                sent_to  = ""
+
+            subject       = (msg.get("subject") or "").strip()
+            received_raw  = msg.get("receivedDateTime", "")
+            date_received = received_raw[:10] if received_raw else ""
+
+            exists = con.execute(
+                "SELECT id, sent_to FROM lam_quotes WHERE subject=? AND date_received=?",
+                (subject, date_received)
+            ).fetchone()
+            if exists:
+                # Only fill in sent_to if blank — never overwrite a user-edited value
+                if sent_to and not exists["sent_to"]:
+                    con.execute("UPDATE lam_quotes SET sent_to=? WHERE id=?",
+                                (sent_to, exists["id"]))
+                    updated += 1
+                else:
+                    skipped += 1
+                continue
+
+            body_content = msg.get("body", {}).get("content", "")
+            content_type = msg.get("body", {}).get("contentType", "text")
+            parsed = _parse_quote_email(subject, body_content, content_type)
+
+            con.execute("""
+            INSERT INTO lam_quotes
+                (date_received, sent_to, subject, job_name, customer, location,
+                 product, price, quantities, amount, est_freight, lead_time)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                date_received, sent_to, subject,
+                parsed.get('job_name'), parsed.get('customer'), parsed.get('location'),
+                parsed.get('product'), parsed.get('price'), parsed.get('quantities'),
+                parsed.get('amount'), parsed.get('est_freight'), parsed.get('lead_time'),
+            ))
+            inserted += 1
+
+    parts = []
+    if inserted: parts.append(f"{inserted} new quote{'' if inserted==1 else 's'} imported")
+    if updated:  parts.append(f"{updated} updated")
+    msg_text = "✓ " + ", ".join(parts) if parts else "✓ Already up to date"
+    return {"inserted": inserted, "skipped": skipped, "message": msg_text}
+
+@app.get("/api/hydrotech-dashboard")
+def hydrotech_dashboard():
+    with get_db() as con:
+        totals = con.execute("""
+            SELECT
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total_amount,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won_amount,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal_amount,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost_amount
+            FROM hydrotech_quotes
+        """).fetchone()
+        by_loc = con.execute("""
+            SELECT location,
+                COUNT(*) as count,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
+            FROM hydrotech_quotes WHERE location IS NOT NULL
+            GROUP BY location ORDER BY total DESC
+        """).fetchall()
+        by_month = con.execute("""
+            SELECT substr(date_received,1,7) as month,
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count
+            FROM hydrotech_quotes
+            WHERE date_received IS NOT NULL AND date_received != ''
+              AND substr(date_received,1,7) >= substr(date('now','-11 months'),1,7)
+            GROUP BY month ORDER BY month
+        """).fetchall()
+        by_status = con.execute("""
+            SELECT status, COUNT(*) as count, COALESCE(SUM(amount),0) as amount
+            FROM hydrotech_quotes WHERE status IS NOT NULL
+            GROUP BY status ORDER BY amount DESC
+        """).fetchall()
+        locations = [r[0] for r in con.execute(
+            "SELECT DISTINCT location FROM hydrotech_quotes WHERE location IS NOT NULL ORDER BY location"
+        ).fetchall()]
+        raw_close_ht = con.execute(
+            "SELECT close_date, status, amount FROM hydrotech_quotes "
+            "WHERE (deleted IS NULL OR deleted=0) AND close_date IS NOT NULL AND close_date != ''"
+        ).fetchall()
+        from collections import defaultdict as _dd2
+        close_acc_ht = _dd2(lambda: dict(total=0.0, won=0.0, verbal=0.0, open=0.0))
+        for row in raw_close_ht:
+            dt = parse_date(row["close_date"])
+            if not dt: continue
+            ym = dt.strftime('%Y-%m')
+            amt = float(row["amount"] or 0)
+            st = (row["status"] or '').strip()
+            if st in ('Lost', 'Duplicate'): continue
+            close_acc_ht[ym]['total'] += amt
+            if st == 'Won':     close_acc_ht[ym]['won']    += amt
+            elif st == 'Verbal': close_acc_ht[ym]['verbal'] += amt
+            else:                close_acc_ht[ym]['open']   += amt
+        by_close_month_ht = [{'month': k, 'total': round(v['total'], 2), 'won': round(v['won'], 2),
+                               'verbal': round(v['verbal'], 2), 'open': round(v['open'], 2)}
+                              for k, v in sorted(close_acc_ht.items())]
+        return {
+            "totals": dict(totals),
+            "by_location": [dict(r) for r in by_loc],
+            "by_month": [dict(r) for r in by_month],
+            "by_status": [dict(r) for r in by_status],
+            "locations": locations,
+            "by_close_month": by_close_month_ht,
+        }
+
+@app.get("/api/lam-dashboard")
+def lam_dashboard():
+    with get_db() as con:
+        totals = con.execute("""
+            SELECT
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total_amount,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won_amount,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal_amount,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost_amount
+            FROM lam_quotes WHERE (deleted IS NULL OR deleted=0)
+        """).fetchone()
+        by_loc = con.execute("""
+            SELECT location,
+                COUNT(*) as count,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal
+            FROM lam_quotes WHERE (deleted IS NULL OR deleted=0) AND location IS NOT NULL
+            GROUP BY location ORDER BY total DESC
+        """).fetchall()
+        by_month = con.execute("""
+            SELECT substr(date_received,1,7) as month,
+                COUNT(*) as total_quotes,
+                COALESCE(SUM(amount),0) as total,
+                COALESCE(SUM(CASE WHEN status='Won'    THEN amount ELSE 0 END),0) as won,
+                COALESCE(SUM(CASE WHEN status='Verbal' THEN amount ELSE 0 END),0) as verbal,
+                COALESCE(SUM(CASE WHEN status='Lost'   THEN amount ELSE 0 END),0) as lost,
+                COUNT(CASE WHEN status='Won'    THEN 1 END) as won_count,
+                COUNT(CASE WHEN status='Verbal' THEN 1 END) as verbal_count,
+                COUNT(CASE WHEN status='Lost'   THEN 1 END) as lost_count
+            FROM lam_quotes
+            WHERE (deleted IS NULL OR deleted=0) AND date_received IS NOT NULL AND date_received != ''
+              AND substr(date_received,1,7) >= substr(date('now','-11 months'),1,7)
+            GROUP BY month ORDER BY month
+        """).fetchall()
+        by_status = con.execute("""
+            SELECT status, COUNT(*) as count, COALESCE(SUM(amount),0) as amount
+            FROM lam_quotes WHERE (deleted IS NULL OR deleted=0) AND status IS NOT NULL
+            GROUP BY status ORDER BY amount DESC
+        """).fetchall()
+        raw_close_lam = con.execute(
+            "SELECT close_date, status, amount FROM lam_quotes "
+            "WHERE (deleted IS NULL OR deleted=0) AND close_date IS NOT NULL AND close_date != ''"
+        ).fetchall()
+        from collections import defaultdict as _dd3
+        close_acc_lam = _dd3(lambda: dict(total=0.0, won=0.0, verbal=0.0, open=0.0))
+        for row in raw_close_lam:
+            dt = parse_date(row["close_date"])
+            if not dt: continue
+            ym = dt.strftime('%Y-%m')
+            amt = float(row["amount"] or 0)
+            st = (row["status"] or '').strip()
+            if st in ('Lost', 'Duplicate'): continue
+            close_acc_lam[ym]['total'] += amt
+            if st == 'Won':      close_acc_lam[ym]['won']    += amt
+            elif st == 'Verbal': close_acc_lam[ym]['verbal'] += amt
+            else:                close_acc_lam[ym]['open']   += amt
+        by_close_month_lam = [{'month': k, 'total': round(v['total'], 2), 'won': round(v['won'], 2),
+                               'verbal': round(v['verbal'], 2), 'open': round(v['open'], 2)}
+                              for k, v in sorted(close_acc_lam.items())]
+        return {
+            "totals": dict(totals),
+            "by_location": [dict(r) for r in by_loc],
+            "by_month": [dict(r) for r in by_month],
+            "by_status": [dict(r) for r in by_status],
+            "by_close_month": by_close_month_lam,
+        }
+
 
 # ── Contacts ─────────────────────────────────────────────────────────────────
 
