@@ -194,7 +194,7 @@ const LAM_CFG = {
   syncUrl:       '/api/lam-sync',
   dashboardBase: '/api/lam-dashboard',
   label:         'LAM',
-  color:         '#7c3aed',
+  color:         '#eab308',
 };
 
 // ── Quote Modal ───────────────────────────────────────────────────────────────
@@ -3925,7 +3925,7 @@ function App() {
           )),
         React.createElement('button', {
           className:`tab ${tab==='lam'?'tab-active':'tab-inactive'}`,
-          style: tab==='lam' ? {background:'#7c3aed'} : {},
+          style: tab==='lam' ? {background:'#eab308', color:'#000'} : {},
           onClick:()=>setTab('lam')
         }, 'LAM Quotes'),
         React.createElement('button', {
