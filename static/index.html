@@ -188,6 +188,14 @@ const GLASSWORKS_CFG = {
   label:         'Glassworks',
   color:         '#0e7490',
 };
+const LAM_CFG = {
+  quotesBase:    '/api/lam-quotes',
+  exportUrl:     '/api/lam-quotes-export',
+  syncUrl:       '/api/lam-sync',
+  dashboardBase: '/api/lam-dashboard',
+  label:         'LAM',
+  color:         '#7c3aed',
+};
 
 // ── Quote Modal ───────────────────────────────────────────────────────────────
 function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
@@ -202,7 +210,7 @@ function QuoteModal({ quote, onClose, onSave, quotesBase = '/api/quotes' }) {
   const [quoteContractors, setQuoteContractors] = useState([]);
   const [ctSearch, setCtSearch] = useState('');
   const [ctOpen, setCtOpen] = useState(false);
-  const quoteType = quotesBase.includes('hydrotech') ? 'hydrotech' : quotesBase.includes('glassworks') ? 'glassworks' : 'rmax';
+  const quoteType = quotesBase.includes('hydrotech') ? 'hydrotech' : quotesBase.includes('glassworks') ? 'glassworks' : quotesBase.includes('lam') ? 'lam' : 'rmax';
 
   const set = (k,v) => setForm(f => ({...f,[k]:v}));
 
@@ -3916,6 +3924,11 @@ function App() {
             'Glassworks Quotes'
           )),
         React.createElement('button', {
+          className:`tab ${tab==='lam'?'tab-active':'tab-inactive'}`,
+          style: tab==='lam' ? {background:'#7c3aed'} : {},
+          onClick:()=>setTab('lam')
+        }, 'LAM Quotes'),
+        React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           style:{marginLeft:'auto'},
           onClick:()=>setTab('sales')
@@ -3928,6 +3941,7 @@ function App() {
       tab === 'dashboard'           ? React.createElement(Dashboard, {key:'rmax-dash',    cfg: RMAX_CFG})
       : tab === 'hydrotech-dashboard' ? React.createElement(Dashboard, {key:'ht-dash',      cfg: HYDROTECH_CFG})
       : tab === 'glassworks-dashboard'? React.createElement(Dashboard, {key:'gw-dash',      cfg: GLASSWORKS_CFG})
+      : tab === 'lam-dashboard'         ? React.createElement(Dashboard, {key:'lam-dash',     cfg: LAM_CFG})
       : tab === 'sales'               ? React.createElement(SalesTab)
       : tab === 'directory'           ? React.createElement(CustomerDirectory, {key:'dir'})
       : tab === 'companies'           ? React.createElement(CompanyAccounts, {key:'companies'})
@@ -3951,6 +3965,16 @@ function App() {
           onRefresh: () => doRefresh(GLASSWORKS_CFG),
           syncing, syncMsg,
           cfg: GLASSWORKS_CFG,
+        })
+      : tab === 'lam'                 ? React.createElement(QuoteList, {
+          key: 'lam',
+          refresh,
+          onEdit: q => openEdit(q, LAM_CFG),
+          onNew: () => openEdit({}, LAM_CFG),
+          onDashboard: () => setTab('lam-dashboard'),
+          onRefresh: () => doRefresh(LAM_CFG),
+          syncing, syncMsg,
+          cfg: LAM_CFG,
         })
       : React.createElement(QuoteList, {
           key: 'rmax',
