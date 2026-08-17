@@ -216,6 +216,11 @@ async def _daily_backup_task():
             date_str = datetime.utcnow().strftime('%Y-%m-%d')
             with open(os.path.join(BACKUP_DIR, f'backup-{date_str}.zip'), 'wb') as fh:
                 fh.write(data)
+            try:
+                _upload_to_onedrive(data, f'backup-{date_str}.zip')
+                print(f'[backup] uploaded to OneDrive: backup-{date_str}.zip')
+            except Exception as oe:
+                print(f'[backup] OneDrive upload failed: {oe}')
             old = sorted(_glob.glob(os.path.join(BACKUP_DIR, 'backup-*.zip')))[:-7]
             for p in old: os.remove(p)
         except Exception as e:
