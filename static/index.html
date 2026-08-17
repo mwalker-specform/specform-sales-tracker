@@ -906,8 +906,9 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
 
   return React.createElement('div', {className:'space-y-4'},
     // Dashboard banner button
-    onDashboard && React.createElement('div', {style:{display:'flex', justifyContent:'flex-end', marginBottom:'4px'}},
-      React.createElement('button', {
+    React.createElement('div', {style:{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px'}},
+      React.createElement('a', {href:'https://www.rmax.com/downloads/product-data-sheets', target:'_blank', rel:'noopener noreferrer', style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'6px 14px',background:'#e8f0fe',color:'#1a56db',borderRadius:'8px',fontWeight:600,fontSize:'13px',textDecoration:'none',border:'1px solid #c3d9ff'}}, '📄 Product Data Sheets'),
+      onDashboard && React.createElement('button', {
         onClick: onDashboard,
         style:{
           background:'linear-gradient(135deg,#1F4E79,#2e6fad)',
