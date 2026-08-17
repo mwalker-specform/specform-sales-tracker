@@ -206,6 +206,28 @@ def _make_backup_zip() -> bytes:
     buf.seek(0)
     return buf.read()
 
+def _upload_to_onedrive(zip_bytes: bytes, filename: str):
+    """Upload a backup zip to OneDrive via Microsoft Graph API."""
+    try:
+        import msal
+    except ImportError:
+        raise Exception("msal not installed")
+    authority = f"https://login.microsoftonline.com/{GRAPH_TENANT_ID}"
+    app_client = msal.ConfidentialClientApplication(
+        GRAPH_CLIENT_ID, authority=authority, client_credential=GRAPH_CLIENT_SECRET
+    )
+    result = app_client.acquire_token_for_client(scopes=['https://graph.microsoft.com/.default'])
+    if 'access_token' not in result:
+        raise Exception(f"MSAL token error: {result.get('error_description','unknown')}")
+    token = result['access_token']
+    folder = 'specform-backups'
+    url = f'https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/drive/root:/{folder}/{filename}:/content'
+    resp = requests.put(url, headers={
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/octet-stream'
+    }, data=zip_bytes, timeout=60)
+    resp.raise_for_status()
+
 async def _daily_backup_task():
     while True:
         now = datetime.utcnow()
