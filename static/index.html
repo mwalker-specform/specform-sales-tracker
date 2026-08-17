@@ -3480,6 +3480,10 @@ function UsersAdmin() {
   const [saving,      setSaving]      = useState(false);
   const [msg,         setMsg]         = useState('');
   const [welcoming,   setWelcoming]   = useState({});   // {userId: 'sending'|'sent'|'error'}
+  const [editingPerms, setEditingPerms] = useState(null);
+  const [permDraft,    setPermDraft]    = useState([]);
+  const ALL_TABS = ['quotes','hydrotech','glassworks','lam','sales'];
+  const TAB_LABELS = {quotes:'RMAX',hydrotech:'Hydrotech',glassworks:'Glassworks',lam:'LAM',sales:'Sales'};
 
   function load() {
     apiFetch('/api/admin/users').then(data => setUsers(data || [])).catch(()=>{});
@@ -3660,7 +3664,23 @@ function UsersAdmin() {
                     title: `Send welcome email to ${u.email}`
                   }, label);
                 })(),
-                React.createElement('button', {
+                 React.createElement('button', {
+                onClick: () => {
+                  if (editingPerms === u.id) { setEditingPerms(null); return; }
+                  setEditingPerms(u.id);
+                  setPermDraft(u.permissions ? JSON.parse(u.permissions) : [...ALL_TABS]);
+                },
+                className: 'text-xs ' + (u.permissions ? 'text-blue-600' : 'text-gray-400') + ' hover:underline'
+              }, u.permissions ? 'Tabs✓' : 'Tabs'),
+              editingPerms === u.id && React.createElement('span', {className:'text-xs ml-1', style:{display:'inline-flex',flexWrap:'wrap',gap:'4px',alignItems:'center'}},
+                ALL_TABS.map(t => React.createElement('label', {key:t, style:{display:'flex',alignItems:'center',gap:'2px',cursor:'pointer'}},
+                  React.createElement('input', {type:'checkbox', checked: permDraft.includes(t), onChange: e => setPermDraft(d => e.target.checked ? [...d, t] : d.filter(x => x !== t))}),
+                  TAB_LABELS[t]
+                )),
+                React.createElement('button', {onClick:()=>{saveUser(u.id,{permissions:JSON.stringify(permDraft)});setEditingPerms(null);}, style:{fontSize:'11px',padding:'1px 5px',background:'#2563eb',color:'white',borderRadius:'3px',border:'none',cursor:'pointer'}}, 'Save'),
+                React.createElement('button', {onClick:()=>setEditingPerms(null), style:{fontSize:'11px',padding:'1px 5px',background:'#e5e7eb',borderRadius:'3px',border:'none',cursor:'pointer'}}, '✕')
+              ),
+             React.createElement('button', {
                   onClick:()=>{setResetId(u.id);setResetPass('');},
                   className:'text-xs text-blue-600 hover:underline'
                 }, 'Reset pw'),
@@ -3811,6 +3831,7 @@ function App() {
       });
   }
 
+  const canSee = t => !user || user.is_admin || (user.permissions ? (()=>{try{return JSON.parse(user.permissions).includes(t)}catch(e){return true}})() : true);
   return React.createElement('div', {className:'min-h-screen'},
     // Splash / Login overlay — always shown until splashGone
     !splashGone && React.createElement('div', {
@@ -3900,14 +3921,14 @@ function App() {
     user && React.createElement('div', {className:'bg-white border-b shadow-sm'},
       React.createElement('div', {className:'tabs-scroll'},
         React.createElement('div', {className:'max-w-7xl mx-auto px-4 sm:px-6 flex gap-2 py-2'},
-        React.createElement('button', {
+        canSee('quotes') && React.createElement('button', {
           className:`tab ${tab==='quotes'?'tab-active':'tab-inactive'}`,
           onClick:()=>setTab('quotes')
         }, React.createElement('span', {style:{display:'flex',alignItems:'center',gap:'6px'}},
             React.createElement('img', {src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB0AAAAUCAYAAABxnDbHAAAE7UlEQVR4nI2UXWhdVRbHf2vvc879SlJtlKqoaBFGRXxQcfzClg7Yygy2tklUWltKVSzKIKMvPuj1quCTAwMdEb+ryWBvxqgFU2YcW6vWD/wAkfqgpYiC1oytaZp7zz3n7L2XD4kx6WTaLlj7Ze3/+q+1+K8l9A+NI9RQZX4TUFUgIq4IAEUaAI+IwK84o4ikiP2AkD7G8Ibd9DctwwP+6IwG1RhM9P9dI6IkxkiHIn0N19mOMQ4bx6Cz/8WgPRizHFt9k9UvbmZ4wFOvm/8lRXSq2vk8KCZSNBxA49/zz3U3Mrx2JZhrQA8hViHoTLeq4Dqe4GJKtSdY8+JVNBqB/qY9ivSY5okqQij+xvDAF6wYLbFitETz5o/x+ZPEVQGOGp9Y1DuMVYy9a76kxyMV1AN8SX/T8t/vAt1nK0t2RWD3HRMXggJnAHDh3jmCiY5JqQiqICajOeABz6fTsb7BG6YLknmAHhsnuPbnALy91EAjnBjpTN1BWbW1l1pXgsurhLAZE68iT4tpBbuZDhUh6U7IWz9B8ldQYfdDYXa645OKAWcPE8tqsFvw3pFUq3gHpe4YEUCnRISCL8DnH6LpZoY3fgv1OV2eGKkGMPRAspW8dQflnsvIJluIvkSe7QEpptZFShjrMXYfL+99HxqBet3QmEt4YqQAJkRsG8j54xPXIXaEpLqUvL0SsTXU7iC27/OPvv1zMP1NS2PmMAg68yL0DU1iZP6LpBqIKwbfWUFz7b+mkj1egTPeJKlePTWFCFwHfH4IMfsQ+Qx0O9tu2QFQr9dN46huj7cyc62/mTB8b0rWGsClB/CZozNR4HPF2IXY5HKi8p1EtVHWDD5HfUnUaDwcLr3j0vj+15ctmtoGZBap6lz/LYB6ARXG9gb6mwnbb/ue4F7Alg2iATQQnMOlOdlkRn4kk0rXRj6558otu84+7frrF+zsreYLprWtEaiAAZPMOt4CwQFBMFYwEkCU3bip/wD6NXHFEIoSYqZULtOhUEBcAdNeOjaxaP1F5yfXLC5P1FSXlAc/ShNh9dByrAiB74EKANZ1UE4nGCGyhwl2P2l5gt6DgXZNqLaUdrQYW74CnwVUIrRoYeMUDYIvEpKFNXzrq8a6J589qdsuJrjvVOzPecf/OcLwd6JSQj75CK9seBqANYO3U6o+QNHpUOT3IPZdKu4U2nEVcmjHgIzj8wMEswmj91PuPZdsfB2ZHaera8SENAv7f7emHPt/j7Xiu2s9C849eCB99/Gbdu+JEF2MGKFy8lPc+NKPGCkodz+FBiA4rD2duHoeRboDkS1oKCEmQ8Nmaov+RGssAx7BF7uQ6CNKFKhWRLPVfHrZT5H5wxuVEK4+fDA/VLb6YL2OiZDIkbe+wNizSOImiKdoj+HdZ9hoGeoyXJYhciZBVyESEXAgZ5EdcXh6GFm3h5VP30nXqS9jLEyO3e1f3bQDVP6yXN4R4ZLZSyCsH1XSn1/A589Q6n4Pm0B7YhlWllA+qU46voG4vBWXfk1gJ0YigjqMXEtl4QWkBy/GGsGU/4PLDGiBLVdx6Q0U5geCPZ/De0frSwnQoNEgROTtt1D9hpGNe+jbeh952svIrbvoG7qAYvIt1HwLuhOVQV5Z+/xMuX1D6wn+VpAErw2ieAI9sgkn40R2GyKPEvstBp+Ec86JGo2N2a/QXwCrn0us76fmigAAAABJRU5ErkJggg==', height:'22', style:{objectFit:'contain', filter: tab==='quotes' ? 'brightness(0) invert(1)' : 'none'}}),
             'RMAX Quotes'
           )),
-        React.createElement('button', {
+        canSee('hydrotech') && React.createElement('button', {
           className:`tab ${tab==='hydrotech'?'tab-active':'tab-inactive'}`,
           style: tab==='hydrotech' ? {background:'#16a34a'} : {},
           onClick:()=>setTab('hydrotech')
@@ -3915,7 +3936,7 @@ function App() {
             React.createElement('img', {src:'data:image/png;base64,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', height:'22', style:{objectFit:'contain', filter: tab==='hydrotech' ? 'brightness(0) invert(1)' : 'none'}}),
             'Hydrotech Quotes'
           )),
-        React.createElement('button', {
+        canSee('glassworks') && React.createElement('button', {
           className:`tab ${tab==='glassworks'?'tab-active':'tab-inactive'}`,
           style: tab==='glassworks' ? {background:'#0e7490'} : {},
           onClick:()=>setTab('glassworks')
@@ -3923,12 +3944,12 @@ function App() {
             React.createElement('img', {src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAAFaUlEQVR42u2Xy24cxxmFv7+quqd7LpzhZRiKom0Ksi3ZBhIYWWWbII+RF8gyz5OHyC7ZZR1kESBRYMSwYomSSHE0nHvfu6qy6CHNUUTDBmJFBng2U6jqQp8+//kvA7e4xS1+3BDvvQD6HeVn330Fsyy7F0XRLwAPSGkt1kIcrkW1lvItS6y19oDkef4XEwTBL4HfXx6GWvNFBUOgDwRaE/6f1AuC4LcGKIC6ss799bxQgRZCBatSM7ae2kOshZ1Isd36RkfnHApwPwAxpZQDFFAYQABTO+/6kVaHbc3JqqZyzUFbCyLCKHOcLGu6geJOWxMbaTzxAxB0zjmllAJEbTAXwXqIjfDRIOCoawi1UDoP3vNBzxAq4dFFifNvJ8wbBPEekSZdPNAJhKOu4cEgoHKwLD3v9RrStVs/21zb+P229dXedyRoXr90GTKBRiXvUUq43zcoETyej7dDLpNcBEQEv37u8tUi0jATQaTxrKzXIAjgvf9+BOXyu+S6YeHRsyWf3u3yr9MlDtiKDP12SBgIaeEYzXPuH3T46mzJ8X6btLB4Dy/nBaER4tCwKmp2OgHnswKlhPf32vQi/T1DfNVeGj2VCIu05uUsZzQvUErx2dEWp9OcF5OUi2XFKq84nxeMFyVZ5fjyNGGWVHw9SvnsqMfxsMM0KREPRgndSPPwsMuTUbJW/jsSFN7sma/OU3a7AU9fJRSVZZaUDDohIsLJq5SssPQizZNRwqATst8L+fJ0SStQzNOKVWHxXmgFCu+hqByrvCY0m9qIyBsrgrnuPy1CUTnO5yUf74TUznNvPyYONfO0YpHWnM0KjodtvPf02wG9SGO0Iq8sy9yy22/x0w+22O62eHaR044MRzst/v0qJQoUgVE8GWd8cthtfCuN17PKEmjBKLmBoAclsMxqJqsC6KIF8spxsaroRppBL6QdauJQ83xaYrSmsJ4X85ytyFA5eDEr2YpDVoWj3dLs9QKeTwvu7nawztOOFO3IcDYvMUYTaRivKkQJO52AvY7ZiKC6nsOl9evMar6idp5pUvPhTzo4B5NVhVsXwElSMVrkAPQig1JCaBTtQLFIa2ZZTVrD1+MSa+GwH9KPDU8nBbO0xno4m2acTAve342INDjr/qv8XBF0HqarChFBr2XWqvHO04uMl8uSpLBM04rn05x2IGzFhtGywnnP2bzE45lnNdZ5cI5eSyN4ui3hZJLzalmy1zH0Io1WwnYn4LAfcjIpUFpxkdQ3e9Baz2hRsh/HG4X3eC9mklTs9wKUEmZpTRRojrbNlXdXFRxtN4X8oC8E6htfHw6aUWOaO7otRfCGTBj2ISk9h9uCeL+RsWazBzbR9XicB62a/B72Qv74zwk/u9vh8Tjj5+91OTsbYUzAYrGkHYW4boeqLMk8GGOYzRbcuTPkYjzFOs/OoMt0XhCEIXleUJU12miUUmitUALSiuj22t9WqNdjzvrCaFnxeJxzNi/Ia7hIav72POXzow6L+ZLxZEma5cRxi2SVMNzfZTFPqOsKax2T6ZwwDJhM5vxjlbLd77HKcnZ2BpR5iVJCXpTEUUSWFxwcDPnk4THOuZtbnVHCJKn50xdT5pnFrFuTwfHoNOHXDwd0o4AHD+/zYHMCoRlAru9dtr/rNdY3bfAGvH5u1rxsaMQ9Hmd+lhSEWlPXTX9FhIOtgI+GEftbrSsyvNZLtRaccxt7IoK17mp9+XLv/Y19eE3OrXl5A4SAjkOjf/eru2QW/vD3hMNhzL09xbZ540B5w6D5v5v6Lwd8o7V+BvzZOeeNUtIWx28+j68qkHWuSRjhbcIrpcR7f/Kj+V8s7yg/zy1ucYtb3OLdxn8Ajkid74lmsDIAAAAASUVORK5CYII=', height:'22', style:{objectFit:'contain', filter: tab==='glassworks' ? 'brightness(0) invert(1)' : 'none'}}),
             'Glassworks Quotes'
           )),
-        React.createElement('button', {
+        canSee('lam') && React.createElement('button', {
           className:`tab ${tab==='lam'?'tab-active':'tab-inactive'}`,
           style: tab==='lam' ? {background:'#eab308', color:'#000', display:'flex', alignItems:'center', gap:'5px'} : {display:'flex', alignItems:'center', gap:'5px'},
           onClick:()=>setTab('lam')
         }, React.createElement('img', {src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABcAAAAUCAYAAABmvqYOAAADz0lEQVR4nJ2VzWudVRCHn5nzvje5Nya5SUpDzFdr0qa2xVaLIGJJ6UYKbgQT3PqxkYIKIgoSKbpSCS78D4qC2K0bQY1KcdMuKm3tF01o7Veg2jbJzf143zPj4qba2qZGz3bOzDyc32/OwBqOgzjjyYmBkU+P7tqVOsha8nQNhYOAnxr47YXBJH2zNL/wgoA7hH/LfSDBCqGc7hlroxRPtqsOLJld8uWwbcvvZyqAC/j/JJ9QAYvF7J2yhsGbMTY6NQzGYnxXwGDigfmrknuzsR8f2rSxiJ8wp8VWaFSoG7J988Vzc4A0G/0n8gkR8CD2UUm1GHEHNOJeEi3mZh83n2RiVcD7BlZEjKd6R/a0epipikVJCChNRiUWRUM1xr2PXj4/c/v+WsjlEPAVBFKZfuj5jO6pGh0vNZDE6dxfJ+k3aACBaYdwaBXQe4o7EzoJcaxl08vrd/gTvqceq98mofpTgvY46bBhSxIqYrFTw+Mn+0demYQ4w/g91tS7CyNwyOfGh8tpkQ+zjdGys0GWv0upHwsk/Y7dFOyGoAlSNbdU5YMLQ0Nde/jRbg+XgzrIP8ib1lueS6c6C9ob+3KL86qYIAHSASP+IXhNQNG6m3Vo6F2ydOpOawqYNGfgL2oF/Mzw5rEk2i85JF3v1aTydSpadrKzSmlfTrwuLH5ZQDscDFfBg5NHkZ2bL5w7faWvr1hJ2zY0qoWLd5KLgEeLn7R6KFA2l6JLPq9I4pBA6DHilaYBPQPPkLyCt2ShkEWbFvCFUNodo09qa+Pp5C7rDYw82xbCc7dqMbb2eiAHX4LqzwmSgJadbC4Qug1tbyoWeixUFyx2Xk32neh/ZK+5zzpsSNxu6IoIfpRdKSrTpu4YJINGfk1Jho2uN+okDxteE7wOXW/XSUciYb1R2BZpf7Eh6TOZy3L4bOul2fN5Xvl8y6W5I/oD40HAikM3XuvMwralJTfqEpI+J15Tkl4nv6ZIEUK30f1+jfqxQPVwQtLfbCiOVoNZOejWUyOjr++cn6/MMJ6Ig54bHe3xRU63brdyVnCxeZWut2osflGg9cmc7LKibU5Y5+RXlbDOiNeVlsciCwcLdL5ap/JN6tn3qXvJb1VrtmXH/Ox1FbAss6l2D92M5dYx2ZDy/hqNM0r9eMANsvMKArUjCQsHCwCkG4xsVintzckuKcl6l0zdOiR0pQWdEjD5tX/0qUQ5DBJcmgpIK9iCIOE+X7WA503HiIK0OrYsTUcJiAjiHrPouxOUA6lIteoeMVccWASSVXfA3bE6UPC/V4ZhRZWQqx/4E+Poz5GAlIKqAAAAAElFTkSuQmCC', style:{height:'24px', width:'auto'}}), 'LAM Quotes'),
-        React.createElement('button', {
+        canSee('sales') && React.createElement('button', {
           className:`tab ${tab==='sales'?'tab-active':'tab-inactive'}`,
           style:{marginLeft:'auto'},
           onClick:()=>setTab('sales')
