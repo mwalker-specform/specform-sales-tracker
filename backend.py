@@ -2790,6 +2790,10 @@ def init_users_db():
             is_active  INTEGER DEFAULT 1,
             created_at TEXT DEFAULT (datetime('now'))
         )""")
+        try:
+            con.execute("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT NULL")
+        except Exception:
+            pass
         for email, is_admin in INITIAL_USERS:
             try:
                 con.execute(
@@ -3661,9 +3665,10 @@ class UserIn(BaseModel):
     is_admin: Optional[int] = 0
 
 class UserUpdateIn(BaseModel):
-    is_active: Optional[int] = None
-    is_admin:  Optional[int] = None
-    password:  Optional[str] = None
+    is_active:   Optional[int] = None
+    is_admin:    Optional[int] = None
+    password:    Optional[str] = None
+    permissions: Optional[str] = None
 
 def _require_admin(request: Request):
     if not request.state.user.get('is_admin'):
@@ -3682,18 +3687,20 @@ def login(body: LoginIn):
         {
             'sub':      email,
             'is_admin': bool(user['is_admin']),
+            'permissions': user['permissions'],
             'exp':      datetime.utcnow() + timedelta(days=JWT_EXPIRE_DAYS),
         },
         JWT_SECRET,
         algorithm=JWT_ALGORITHM,
     )
-    return {'token': token, 'email': email, 'is_admin': bool(user['is_admin'])}
+    return {'token': token, 'email': email, 'is_admin': bool(user['is_admin']), 'permissions': user['permissions']}
 
 @app.get('/api/auth/me')
 def get_me(request: Request):
     return {
-        'email':    request.state.user['sub'],
-        'is_admin': request.state.user.get('is_admin', False),
+        'email':       request.state.user['sub'],
+        'is_admin':    request.state.user.get('is_admin', False),
+        'permissions': request.state.user.get('permissions'),
     }
 
 class ChangePasswordIn(BaseModel):
@@ -3718,7 +3725,7 @@ def admin_list_users(request: Request):
     _require_admin(request)
     with get_db() as con:
         rows = con.execute(
-            "SELECT id, email, is_admin, is_active, created_at FROM users ORDER BY email"
+            "SELECT id, email, is_admin, is_active, permissions, created_at FROM users ORDER BY email"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -3748,6 +3755,8 @@ def admin_update_user(user_id: int, request: Request, body: UserUpdateIn):
         if body.password:
             con.execute("UPDATE users SET pwd_hash=? WHERE id=?",
                         (_hash_pw(body.password), user_id))
+        if body.permissions is not None:
+            con.execute("UPDATE users SET permissions=? WHERE id=?", (body.permissions, user_id))
     return {'ok': True}
 
 @app.delete('/api/admin/users/{user_id}')
