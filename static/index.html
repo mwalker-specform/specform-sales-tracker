@@ -3677,7 +3677,7 @@ function UsersAdmin() {
                   React.createElement('input', {type:'checkbox', checked: permDraft.includes(t), onChange: e => setPermDraft(d => e.target.checked ? [...d, t] : d.filter(x => x !== t))}),
                   TAB_LABELS[t]
                 )),
-                React.createElement('button', {onClick:()=>{saveUser(u.id,{permissions:JSON.stringify(permDraft)});setEditingPerms(null);}, style:{fontSize:'11px',padding:'1px 5px',background:'#2563eb',color:'white',borderRadius:'3px',border:'none',cursor:'pointer'}}, 'Save'),
+                React.createElement('button', {onClick:()=>{apiFetch(`/api/admin/users/${u.id}`,{method:'PUT',body:JSON.stringify({permissions:JSON.stringify(permDraft)})}).then(()=>load());setEditingPerms(null);}, style:{fontSize:'11px',padding:'1px 5px',background:'#2563eb',color:'white',borderRadius:'3px',border:'none',cursor:'pointer'}}, 'Save'),
                 React.createElement('button', {onClick:()=>setEditingPerms(null), style:{fontSize:'11px',padding:'1px 5px',background:'#e5e7eb',borderRadius:'3px',border:'none',cursor:'pointer'}}, '✕')
               ),
              React.createElement('button', {
