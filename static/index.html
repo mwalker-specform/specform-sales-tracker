@@ -3558,7 +3558,11 @@ function UsersAdmin() {
       React.createElement('button', {
         onClick:()=>setAdding(true),
         className:'flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700'
-      }, '+ Add User')
+      }, '+ Add User'),
+      React.createElement('button', {
+        onClick:()=>{ window.open('/api/admin/backup','_blank'); },
+        className:'flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-700'
+      }, '\u2b07 Backup')
     ),
 
     msg && React.createElement('div', {className:'mb-4 p-3 rounded-lg bg-green-50 text-green-700 text-sm font-medium border border-green-200'}, msg),
