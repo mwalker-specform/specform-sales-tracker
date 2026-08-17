@@ -3560,7 +3560,17 @@ function UsersAdmin() {
         className:'flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700'
       }, '+ Add User'),
       React.createElement('button', {
-        onClick:()=>{ window.open('/api/admin/backup','_blank'); },
+        onClick: async ()=>{
+          const token = sessionStorage.getItem('auth_token');
+          const resp = await fetch('/api/admin/backup', {headers: token ? {'Authorization':'Bearer '+token} : {}});
+          if (!resp.ok) { alert('Backup failed: ' + resp.status); return; }
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = 'specform-backup.zip';
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a); URL.revokeObjectURL(url);
+        },
         className:'flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-700'
       }, '\u2b07 Backup')
     ),
