@@ -206,6 +206,27 @@ def _make_backup_zip() -> bytes:
     buf.seek(0)
     return buf.read()
 
+def _send_backup_alert(error_msg: str):
+    """Send an email alert when a backup fails."""
+    try:
+        import msal
+        authority = f"https://login.microsoftonline.com/{GRAPH_TENANT_ID}"
+        app_client = msal.ConfidentialClientApplication(
+            GRAPH_CLIENT_ID, authority=authority, client_credential=GRAPH_CLIENT_SECRET
+        )
+        result = app_client.acquire_token_for_client(scopes=['https://graph.microsoft.com/.default'])
+        if 'access_token' not in result:
+            return
+        admin_email = os.environ.get('BACKUP_ALERT_EMAIL', GRAPH_USER)
+        requests.post(
+            f'https://graph.microsoft.com/v1.0/users/{GRAPH_USER}/sendMail',
+            headers={'Authorization': f'Bearer {result["access_token"]}', 'Content-Type': 'application/json'},
+            json={'message': {'subject': '[SPECFORM] Backup Failed', 'body': {'contentType': 'Text', 'content': f'Automated backup failed on {datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}:\n\n{error_msg}'}, 'toRecipients': [{'emailAddress': {'address': admin_email}}]}},
+            timeout=30
+        )
+    except Exception as alert_err:
+        print(f'[backup] alert email failed: {alert_err}')
+
 def _upload_to_onedrive(zip_bytes: bytes, filename: str):
     """Upload a backup zip to OneDrive via Microsoft Graph API."""
     try:
@@ -247,6 +268,7 @@ async def _daily_backup_task():
             for p in old: os.remove(p)
         except Exception as e:
             print(f'[backup] daily backup failed: {e}')
+            _send_backup_alert(str(e))
 
 @app.get('/api/admin/backup')
 def admin_download_backup(request: Request):
