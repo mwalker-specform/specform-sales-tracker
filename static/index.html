@@ -170,6 +170,8 @@ const RMAX_CFG = {
   dashboardBase: '/api/dashboard',
   label:         'RMAX',
   color:         '#1d4ed8',
+  resourceUrl:   'https://www.rmax.com/downloads/product-data-sheets',
+  resourceLabel: '📄 Product Data Sheets',
 };
 const HYDROTECH_CFG = {
   quotesBase:    '/api/hydrotech-quotes',
@@ -179,6 +181,8 @@ const HYDROTECH_CFG = {
   label:         'Hydrotech',
   color:         '#16a34a',
   regions:       ['Southeast Texas'],
+  resourceUrl:   'https://www.hydrotechusa.com/resources/dashboard.php',
+  resourceLabel: '🔗 Resource Center',
 };
 const GLASSWORKS_CFG = {
   quotesBase:    '/api/glassworks-quotes',
@@ -859,7 +863,7 @@ function Dashboard({ cfg = RMAX_CFG }) {
 const normLoc = s => (s || '(No Location)').replace(/,?\s+([a-zA-Z]{2})$/, (_, st) => ', ' + st.toUpperCase());
 
 function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, syncMsg, cfg = RMAX_CFG }) {
-  const { quotesBase, exportUrl, dashboardBase } = cfg;
+  const { quotesBase, exportUrl, dashboardBase, resourceUrl, resourceLabel } = cfg;
   const [quotes, setQuotes]             = useState([]);
   const [loading, setLoading]           = useState(true);
   const [filters, setFilters]           = useState({status:'All', search:''});
@@ -907,7 +911,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
   return React.createElement('div', {className:'space-y-4'},
     // Dashboard banner button
     React.createElement('div', {style:{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px'}},
-      React.createElement('a', {href:'https://www.rmax.com/downloads/product-data-sheets', target:'_blank', rel:'noopener noreferrer', style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'6px 14px',background:'#e8f0fe',color:'#1a56db',borderRadius:'8px',fontWeight:600,fontSize:'13px',textDecoration:'none',border:'1px solid #c3d9ff'}}, '📄 Product Data Sheets'),
+      resourceUrl && React.createElement('a', {href:resourceUrl, target:'_blank', rel:'noopener noreferrer', style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'6px 14px',background:'#e8f0fe',color:'#1a56db',borderRadius:'8px',fontWeight:600,fontSize:'13px',textDecoration:'none',border:'1px solid #c3d9ff'}}, resourceLabel || '🔗 Resources'),
       onDashboard && React.createElement('button', {
         onClick: onDashboard,
         style:{
