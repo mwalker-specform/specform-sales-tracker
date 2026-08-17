@@ -3,7 +3,7 @@
 RMAX Quote Tracker — FastAPI backend
 Run: uvicorn backend:app --reload --port 8000
 """
-import os, sqlite3, json, glob as _glob, shutil, tempfile, io, time
+import os, sqlite3, json, glob as _glob, shutil, tempfile, io, time, csv, zipfile, asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, date
 from contextlib import contextmanager
@@ -40,7 +40,7 @@ def normalize_date(s: str) -> str:
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import bcrypt as _bcrypt
@@ -51,6 +51,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # DATA_DIR can be overridden via env var so the DB lives on a persistent Railway volume.
 # In Railway: set DATA_DIR=/data and mount a volume at /data.
 DATA_DIR = os.environ.get("DATA_DIR", BASE_DIR)
+BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH  = os.path.join(DATA_DIR, "quotes.db")
 STATIC   = os.path.join(BASE_DIR, "static")
@@ -185,8 +186,54 @@ async def auth_middleware(request: Request, call_next):
         return JSONResponse({'detail': 'Invalid or expired token'}, status_code=401)
     return await call_next(request)
 
+# ── Backup ───────────────────────────────────────────────────────────────────
+def _make_backup_zip() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        with get_db() as con:
+            tables = con.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+            for row in tables:
+                table = row['name']
+                try:
+                    rows = con.execute(f"SELECT * FROM [{table}]").fetchall()
+                    if not rows: continue
+                    csv_buf = io.StringIO()
+                    writer = csv.DictWriter(csv_buf, fieldnames=rows[0].keys())
+                    writer.writeheader()
+                    writer.writerows([dict(r) for r in rows])
+                    zf.writestr(f"{table}.csv", csv_buf.getvalue())
+                except Exception: pass
+    buf.seek(0)
+    return buf.read()
+
+async def _daily_backup_task():
+    while True:
+        now = datetime.utcnow()
+        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        await asyncio.sleep((tomorrow - now).total_seconds())
+        try:
+            data = _make_backup_zip()
+            date_str = datetime.utcnow().strftime('%Y-%m-%d')
+            with open(os.path.join(BACKUP_DIR, f'backup-{date_str}.zip'), 'wb') as fh:
+                fh.write(data)
+            old = sorted(_glob.glob(os.path.join(BACKUP_DIR, 'backup-*.zip')))[:-7]
+            for p in old: os.remove(p)
+        except Exception as e:
+            print(f'[backup] daily backup failed: {e}')
+
+@app.get('/api/admin/backup')
+def admin_download_backup(request: Request):
+    _require_admin(request)
+    date_str = datetime.utcnow().strftime('%Y-%m-%d')
+    zip_bytes = _make_backup_zip()
+    return StreamingResponse(
+        io.BytesIO(zip_bytes),
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="specform-backup-{date_str}.zip"'}
+    )
+
 @app.on_event("startup")
-def startup():
+async def startup():
     init_db()
     init_hydrotech_db()
     init_glassworks_db()
@@ -194,6 +241,8 @@ def startup():
     init_contacts_db()
     init_users_db()
     migrate_dates()
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    asyncio.create_task(_daily_backup_task())
 
 def migrate_dates():
     """One-time migration: normalize any non-ISO date strings in existing rows."""
