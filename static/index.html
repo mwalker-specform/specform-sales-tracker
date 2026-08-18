@@ -2313,6 +2313,127 @@ function CustomerDirectory() {
 }
 
 // ── Company Accounts ──────────────────────────────────────────────────────────
+
+// ── Customer Prospects ─────────────────────────────────────────────────────────────
+function CustomerProspects() {
+  const [prospects, setProspects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const EMPTY = {company_name:'',contact_name:'',title:'',phone:'',email:'',region:'',status:'Cold',notes:''};
+  const [form, setForm] = useState({...EMPTY});
+
+  function load() {
+    setLoading(true);
+    apiFetch('/api/prospects').then(d => { setProspects(d||[]); setLoading(false); }).catch(()=>setLoading(false));
+  }
+  useEffect(load, []);
+
+  function openAdd() { setEditing(null); setForm({...EMPTY}); setModalOpen(true); }
+  function openEdit(p) {
+    setEditing(p);
+    setForm({company_name:p.company_name||'',contact_name:p.contact_name||'',title:p.title||'',phone:p.phone||'',email:p.email||'',region:p.region||'',status:p.status||'Cold',notes:p.notes||''});
+    setModalOpen(true);
+  }
+  async function save() {
+    if (editing) await apiFetch('/api/prospects/'+editing.id, {method:'PUT',body:JSON.stringify(form)});
+    else await apiFetch('/api/prospects', {method:'POST',body:JSON.stringify(form)});
+    setModalOpen(false); load();
+  }
+  async function del(id) {
+    if (!confirm('Delete this prospect?')) return;
+    await apiFetch('/api/prospects/'+id, {method:'DELETE'}); load();
+  }
+  const filtered = prospects.filter(p => {
+    const q = search.toLowerCase();
+    return !q || [p.company_name,p.contact_name,p.email,p.region,p.status].some(f=>(f||'').toLowerCase().includes(q));
+  });
+  const statusColors = {Cold:'#6b7280',Warm:'#d97706',Hot:'#dc2626'};
+  const inp = (key, ph, type) => React.createElement('input', {
+    type:type||'text', value:form[key]||'', placeholder:ph,
+    onChange:e=>setForm(f=>({...f,[key]:e.target.value})),
+    style:{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'14px',boxSizing:'border-box'}
+  });
+  return React.createElement('div', {style:{padding:'24px',maxWidth:'1400px',margin:'0 auto'}},
+    React.createElement('div', {style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}},
+      React.createElement('div', {},
+        React.createElement('h2', {style:{margin:0,fontSize:'22px',fontWeight:700,color:'#1e293b'}}, '🎯 Customer Prospects'),
+        React.createElement('p', {style:{margin:'4px 0 0',color:'#64748b',fontSize:'14px'}}, filtered.length+' prospect'+(filtered.length!==1?'s':'')+' found')
+      ),
+      React.createElement('button', {onClick:openAdd,style:{padding:'8px 18px',background:'#1a56db',color:'#fff',border:'none',borderRadius:'8px',fontWeight:600,cursor:'pointer',fontSize:'14px'}}, '+ Add Prospect')
+    ),
+    React.createElement('input', {placeholder:'Search prospects...',value:search,onChange:e=>setSearch(e.target.value),style:{width:'100%',padding:'9px 12px',border:'1px solid #d1d5db',borderRadius:'8px',fontSize:'14px',marginBottom:'16px',boxSizing:'border-box'}}),
+    loading ? React.createElement('div',{style:{textAlign:'center',padding:'40px',color:'#64748b'}},'Loading...') :
+    filtered.length===0 ? React.createElement('div',{style:{textAlign:'center',padding:'40px',color:'#94a3b8'}},'No prospects yet. Click + Add Prospect to get started.') :
+    React.createElement('div',{style:{overflowX:'auto'}},
+      React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:'14px'}},
+        React.createElement('thead',{},
+          React.createElement('tr',{style:{background:'#f8fafc',borderBottom:'2px solid #e2e8f0'}},
+            ['Company','Contact','Title','Phone','Email','Region','Status','Notes',''].map(h=>
+              React.createElement('th',{key:h,style:{padding:'10px 12px',textAlign:'left',fontWeight:600,color:'#475569',whiteSpace:'nowrap'}},h)
+            )
+          )
+        ),
+        React.createElement('tbody',{},
+          filtered.map(p=>React.createElement('tr',{key:p.id,style:{borderBottom:'1px solid #f1f5f9'}},
+            React.createElement('td',{style:{padding:'10px 12px',fontWeight:500}},p.company_name||'—'),
+            React.createElement('td',{style:{padding:'10px 12px'}},p.contact_name||'—'),
+            React.createElement('td',{style:{padding:'10px 12px',color:'#64748b'}},p.title||'—'),
+            React.createElement('td',{style:{padding:'10px 12px'}},p.phone||'—'),
+            React.createElement('td',{style:{padding:'10px 12px'}},p.email||'—'),
+            React.createElement('td',{style:{padding:'10px 12px'}},p.region||'—'),
+            React.createElement('td',{style:{padding:'10px 12px'}},
+              React.createElement('span',{style:{padding:'3px 10px',borderRadius:'12px',fontSize:'12px',fontWeight:600,color:'#fff',background:statusColors[p.status]||'#6b7280'}},p.status||'Cold')
+            ),
+            React.createElement('td',{style:{padding:'10px 12px',color:'#64748b',maxWidth:'180px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},p.notes||''),
+            React.createElement('td',{style:{padding:'10px 12px',whiteSpace:'nowrap'}},
+              React.createElement('button',{onClick:()=>openEdit(p),style:{marginRight:'6px',padding:'4px 10px',background:'#e0f2fe',color:'#0369a1',border:'none',borderRadius:'5px',cursor:'pointer',fontSize:'12px',fontWeight:600}},'Edit'),
+              React.createElement('button',{onClick:()=>del(p.id),style:{padding:'4px 10px',background:'#fee2e2',color:'#dc2626',border:'none',borderRadius:'5px',cursor:'pointer',fontSize:'12px',fontWeight:600}},'Delete')
+            )
+          ))
+        )
+      )
+    ),
+    modalOpen && React.createElement('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}},
+      React.createElement('div',{style:{background:'#fff',borderRadius:'12px',padding:'28px',width:'500px',maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}},
+        React.createElement('h3',{style:{margin:'0 0 20px',fontSize:'18px',fontWeight:700}},editing?'Edit Prospect':'Add Prospect'),
+        React.createElement('div',{style:{display:'grid',gap:'12px'}},
+          React.createElement('div',{},
+            React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Company Name'),
+            inp('company_name','Company Name')
+          ),
+          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}},
+            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Contact Name'),inp('contact_name','Contact Name')),
+            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Title'),inp('title','Title'))
+          ),
+          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}},
+            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Phone'),inp('phone','Phone')),
+            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Email'),inp('email','Email','email'))
+          ),
+          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}},
+            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Region'),inp('region','Region')),
+            React.createElement('div',{},
+              React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Status'),
+              React.createElement('select',{value:form.status,onChange:e=>setForm(f=>({...f,status:e.target.value})),style:{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'14px'}},
+                ['Cold','Warm','Hot'].map(s=>React.createElement('option',{key:s,value:s},s))
+              )
+            )
+          ),
+          React.createElement('div',{},
+            React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Notes'),
+            React.createElement('textarea',{value:form.notes||'',placeholder:'Notes...',onChange:e=>setForm(f=>({...f,notes:e.target.value})),style:{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'14px',minHeight:'80px',resize:'vertical',boxSizing:'border-box'}})
+          )
+        ),
+        React.createElement('div',{style:{display:'flex',gap:'10px',marginTop:'20px',justifyContent:'flex-end'}},
+          React.createElement('button',{onClick:()=>setModalOpen(false),style:{padding:'9px 18px',background:'#f1f5f9',border:'none',borderRadius:'8px',cursor:'pointer',fontWeight:600}},'Cancel'),
+          React.createElement('button',{onClick:save,style:{padding:'9px 18px',background:'#1a56db',color:'#fff',border:'none',borderRadius:'8px',cursor:'pointer',fontWeight:600}},editing?'Update':'Add Prospect')
+        )
+      )
+    )
+  );
+}
+
 function CompanyAccounts() {
   const [companies,     setCompanies]     = useState([]);
   const [loading,       setLoading]       = useState(true);
@@ -3491,8 +3612,8 @@ function UsersAdmin() {
   const [welcoming,   setWelcoming]   = useState({});   // {userId: 'sending'|'sent'|'error'}
   const [editingPerms, setEditingPerms] = useState(null);
   const [permDraft,    setPermDraft]    = useState([]);
-  const ALL_TABS = ['quotes','hydrotech','glassworks','lam','sales'];
-  const TAB_LABELS = {quotes:'RMAX',hydrotech:'Hydrotech',glassworks:'Glassworks',lam:'LAM',sales:'Sales'};
+  const ALL_TABS = ['quotes','hydrotech','glassworks','lam','sales','prospects'];
+  const TAB_LABELS = {quotes:'RMAX',hydrotech:'Hydrotech',glassworks:'Glassworks',lam:'LAM',sales:'Sales',prospects:'Prospects'};
 
   function load() {
     apiFetch('/api/admin/users').then(data => setUsers(data || [])).catch(()=>{});
@@ -3897,6 +4018,13 @@ function App() {
               ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
               : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
           }, '🏢 Company Accounts'),
+          React.createElement('button', {
+            onClick: () => setTab('prospects'),
+            className: 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap',
+            style: tab === 'prospects'
+              ? {background:'rgba(255,255,255,0.25)', color:'#fff', border:'1px solid rgba(255,255,255,0.5)'}
+              : {background:'rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.85)', border:'1px solid rgba(255,255,255,0.2)'}
+          }, '🎯 Customer Prospects'),
           // Admin: Users management
           user && user.is_admin && React.createElement('button', {
             onClick: () => setTab('users'),
@@ -3989,6 +4117,7 @@ function App() {
       : tab === 'sales'               ? React.createElement(SalesTab)
       : tab === 'directory'           ? React.createElement(CustomerDirectory, {key:'dir'})
       : tab === 'companies'           ? React.createElement(CompanyAccounts, {key:'companies'})
+      : tab === 'prospects'           ? React.createElement(CustomerProspects, {key:'prospects'})
       : tab === 'users'               ? React.createElement(UsersAdmin, {key:'users'})
       : tab === 'hydrotech'           ? React.createElement(QuoteList, {
           key: 'hydrotech',
