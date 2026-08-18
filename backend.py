@@ -186,6 +186,68 @@ async def auth_middleware(request: Request, call_next):
         return JSONResponse({'detail': 'Invalid or expired token'}, status_code=401)
     return await call_next(request)
 
+# ── Customer Prospects ────────────────────────────────────────────────────────────────────────────────
+def init_prospects_db():
+    with get_db() as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS prospects (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_name TEXT,
+                contact_name TEXT,
+                title        TEXT,
+                phone        TEXT,
+                email        TEXT,
+                region       TEXT,
+                status       TEXT DEFAULT 'Cold',
+                notes        TEXT,
+                created_at   TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+class ProspectIn(BaseModel):
+    company_name: str = ""
+    contact_name: str = ""
+    title:        str = ""
+    phone:        str = ""
+    email:        str = ""
+    region:       str = ""
+    status:       str = "Cold"
+    notes:        str = ""
+
+@app.get('/api/prospects')
+def list_prospects(request: Request):
+    _require_auth(request)
+    with get_db() as con:
+        rows = con.execute("SELECT * FROM prospects ORDER BY company_name").fetchall()
+    return [dict(r) for r in rows]
+
+@app.post('/api/prospects')
+def create_prospect(p: ProspectIn, request: Request):
+    _require_auth(request)
+    with get_db() as con:
+        cur = con.execute(
+            "INSERT INTO prospects (company_name,contact_name,title,phone,email,region,status,notes) VALUES (?,?,?,?,?,?,?,?)",
+            (p.company_name,p.contact_name,p.title,p.phone,p.email,p.region,p.status,p.notes)
+        )
+        return {"id": cur.lastrowid}
+
+@app.put('/api/prospects/{pid}')
+def update_prospect(pid: int, p: ProspectIn, request: Request):
+    _require_auth(request)
+    with get_db() as con:
+        con.execute(
+            "UPDATE prospects SET company_name=?,contact_name=?,title=?,phone=?,email=?,region=?,status=?,notes=? WHERE id=?",
+            (p.company_name,p.contact_name,p.title,p.phone,p.email,p.region,p.status,p.notes,pid)
+        )
+    return {"ok": True}
+
+@app.delete('/api/prospects/{pid}')
+def delete_prospect(pid: int, request: Request):
+    _require_admin(request)
+    with get_db() as con:
+        con.execute("DELETE FROM prospects WHERE id=?", (pid,))
+    return {"ok": True}
+
 # ── Backup ───────────────────────────────────────────────────────────────────
 def _make_backup_zip() -> bytes:
     buf = io.BytesIO()
@@ -288,6 +350,7 @@ async def startup():
     init_glassworks_db()
     init_lam_db()
     init_contacts_db()
+    init_prospects_db()
     init_users_db()
     migrate_dates()
     os.makedirs(BACKUP_DIR, exist_ok=True)
