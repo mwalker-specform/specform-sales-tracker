@@ -216,14 +216,12 @@ class ProspectIn(BaseModel):
 
 @app.get('/api/prospects')
 def list_prospects(request: Request):
-    _require_auth(request)
     with get_db() as con:
         rows = con.execute("SELECT * FROM prospects ORDER BY company_name").fetchall()
     return [dict(r) for r in rows]
 
 @app.post('/api/prospects')
 def create_prospect(p: ProspectIn, request: Request):
-    _require_auth(request)
     with get_db() as con:
         cur = con.execute(
             "INSERT INTO prospects (company_name,contact_name,title,phone,email,region,status,notes) VALUES (?,?,?,?,?,?,?,?)",
@@ -233,7 +231,6 @@ def create_prospect(p: ProspectIn, request: Request):
 
 @app.put('/api/prospects/{pid}')
 def update_prospect(pid: int, p: ProspectIn, request: Request):
-    _require_auth(request)
     with get_db() as con:
         con.execute(
             "UPDATE prospects SET company_name=?,contact_name=?,title=?,phone=?,email=?,region=?,status=?,notes=? WHERE id=?",
