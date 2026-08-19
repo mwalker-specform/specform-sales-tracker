@@ -210,9 +210,14 @@ def init_prospects_db():
                 region       TEXT,
                 status       TEXT DEFAULT 'Cold',
                 notes        TEXT,
+                product_lines TEXT,
                 created_at   TEXT DEFAULT (datetime('now'))
             )
         """)
+        try:
+            con.execute("ALTER TABLE prospects ADD COLUMN product_lines TEXT")
+        except Exception:
+            pass  # column already exists
 
 class ProspectIn(BaseModel):
     company_name: str = ""
@@ -223,6 +228,7 @@ class ProspectIn(BaseModel):
     region:       str = ""
     status:       str = "Cold"
     notes:        str = ""
+    product_lines: Optional[str] = None
 
 @app.get('/api/prospects')
 def list_prospects(request: Request):
@@ -234,8 +240,8 @@ def list_prospects(request: Request):
 def create_prospect(p: ProspectIn, request: Request):
     with get_db() as con:
         cur = con.execute(
-            "INSERT INTO prospects (company_name,contact_name,title,phone,email,region,status,notes) VALUES (?,?,?,?,?,?,?,?)",
-            (p.company_name,p.contact_name,p.title,p.phone,p.email,p.region,p.status,p.notes)
+            "INSERT INTO prospects (company_name,contact_name,title,phone,email,region,status,notes,product_lines) VALUES (?,?,?,?,?,?,?,?,?)",
+            (p.company_name,p.contact_name,p.title,p.phone,p.email,p.region,p.status,p.notes,p.product_lines)
         )
         return {"id": cur.lastrowid}
 
@@ -243,8 +249,8 @@ def create_prospect(p: ProspectIn, request: Request):
 def update_prospect(pid: int, p: ProspectIn, request: Request):
     with get_db() as con:
         con.execute(
-            "UPDATE prospects SET company_name=?,contact_name=?,title=?,phone=?,email=?,region=?,status=?,notes=? WHERE id=?",
-            (p.company_name,p.contact_name,p.title,p.phone,p.email,p.region,p.status,p.notes,pid)
+            "UPDATE prospects SET company_name=?,contact_name=?,title=?,phone=?,email=?,region=?,status=?,notes=?,product_lines=? WHERE id=?",
+            (p.company_name,p.contact_name,p.title,p.phone,p.email,p.region,p.status,p.notes,p.product_lines,pid)
         )
     return {"ok": True}
 
@@ -254,6 +260,26 @@ def delete_prospect(pid: int, request: Request):
     with get_db() as con:
         con.execute("DELETE FROM prospects WHERE id=?", (pid,))
     return {"ok": True}
+
+@app.post('/api/prospects/{pid}/promote')
+def promote_prospect(pid: int, request: Request):
+    """Promote a prospect to a Company Account and remove from prospects."""
+    with get_db() as con:
+        row = con.execute("SELECT * FROM prospects WHERE id=?", (pid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Prospect not found")
+        cur = con.execute(
+            "INSERT INTO companies (name,phone,region,notes,account_type,created_at,updated_at) VALUES (?,?,?,?,?,datetime('now'),datetime('now'))",
+            (row['company_name'], row['phone'], row['region'], row['notes'], 'Prospect')
+        )
+        company_id = cur.lastrowid
+        if row['contact_name']:
+            con.execute(
+                "INSERT INTO company_contacts (company_id,name,title,phone,email,created_at) VALUES (?,?,?,?,?,datetime('now'))",
+                (company_id, row['contact_name'], row['title'], row['phone'], row['email'])
+            )
+        con.execute("DELETE FROM prospects WHERE id=?", (pid,))
+        return {"ok": True, "company_id": company_id}
 
 # ── Backup ───────────────────────────────────────────────────────────────────
 def _make_backup_zip() -> bytes:
