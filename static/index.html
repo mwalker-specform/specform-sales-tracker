@@ -2371,124 +2371,133 @@ function CustomerDirectory() {
 
 // ── Customer Prospects ─────────────────────────────────────────────────────────────
 function CustomerProspects() {
-  const [prospects, setProspects] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const EMPTY = {company_name:'',contact_name:'',title:'',phone:'',email:'',region:'',status:'Cold',notes:''};
-  const [form, setForm] = useState({...EMPTY});
+  const PRODUCT_LINES = ['RMAX', 'Hydrotech', 'Glassworks', 'LAM'];
+  const [prospects,      setProspects]      = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [search,         setSearch]         = useState('');
+  const [modalOpen,      setModalOpen]      = useState(false);
+  const [editing,        setEditing]        = useState(null);
+  const [form,           setForm]           = useState({});
+  const [modalProducts,  setModalProducts]  = useState([]);
+  const [promoting,      setPromoting]      = useState(false);
+  const [savingProds,    setSavingProds]    = useState(false);
+  const [addOpen,        setAddOpen]        = useState(false);
+  const [newForm,        setNewForm]        = useState({company_name:'',contact_name:'',title:'',phone:'',email:'',region:'',status:'Cold',notes:''});
 
   function load() {
     setLoading(true);
-    apiFetch('/api/prospects').then(d => { setProspects(d||[]); setLoading(false); }).catch(()=>setLoading(false));
+    apiFetch('/api/prospects')
+      .then(d => { setProspects(d); setLoading(false); })
+      .catch(() => setLoading(false));
   }
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
 
-  function openAdd() { setEditing(null); setForm({...EMPTY}); setModalOpen(true); }
-  function openEdit(p) {
-    setEditing(p);
-    setForm({company_name:p.company_name||'',contact_name:p.contact_name||'',title:p.title||'',phone:p.phone||'',email:p.email||'',region:p.region||'',status:p.status||'Cold',notes:p.notes||''});
+  function openModal(p) {
+    setEditing(p); setForm({...p});
+    setModalProducts((p.product_lines||'').split(',').filter(Boolean));
     setModalOpen(true);
   }
-  async function save() {
-    if (editing) await apiFetch('/api/prospects/'+editing.id, {method:'PUT',body:JSON.stringify(form)});
-    else await apiFetch('/api/prospects', {method:'POST',body:JSON.stringify(form)});
-    setModalOpen(false); load();
+  function closeModal() { setModalOpen(false); setEditing(null); setForm({}); setModalProducts([]); }
+  function toggleProduct(pl) { setModalProducts(prev => prev.includes(pl) ? prev.filter(x=>x!==pl) : [...prev,pl]); }
+
+  function saveModal() {
+    setSavingProds(true);
+    apiFetch('/api/prospects/'+editing.id, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...form, product_lines:modalProducts.join(',')})})
+      .then(()=>{ closeModal(); load(); })
+      .catch(e=>alert('Save failed: '+e.message))
+      .finally(()=>setSavingProds(false));
   }
-  async function del(id) {
-    if (!confirm('Delete this prospect?')) return;
-    await apiFetch('/api/prospects/'+id, {method:'DELETE'}); load();
+  function promote() {
+    if(!confirm('Promote "'+editing.company_name+'" to Company Accounts?')) return;
+    setPromoting(true);
+    apiFetch('/api/prospects/'+editing.id+'/promote',{method:'POST'})
+      .then(()=>{ closeModal(); load(); })
+      .catch(e=>alert('Promote failed: '+e.message))
+      .finally(()=>setPromoting(false));
   }
-  const filtered = prospects.filter(p => {
-    const q = search.toLowerCase();
-    return !q || [p.company_name,p.contact_name,p.email,p.region,p.status].some(f=>(f||'').toLowerCase().includes(q));
-  });
-  const statusColors = {Cold:'#6b7280',Warm:'#d97706',Hot:'#dc2626'};
-  const inp = (key, ph, type) => React.createElement('input', {
-    type:type||'text', value:form[key]||'', placeholder:ph,
-    onChange:e=>setForm(f=>({...f,[key]:e.target.value})),
-    style:{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'14px',boxSizing:'border-box'}
-  });
-  return React.createElement('div', {style:{padding:'24px',maxWidth:'1400px',margin:'0 auto'}},
-    React.createElement('div', {style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}},
-      React.createElement('div', {},
-        React.createElement('h2', {style:{margin:0,fontSize:'22px',fontWeight:700,color:'#1e293b'}}, '🎯 Customer Prospects'),
-        React.createElement('p', {style:{margin:'4px 0 0',color:'#64748b',fontSize:'14px'}}, filtered.length+' prospect'+(filtered.length!==1?'s':'')+' found')
-      ),
-      React.createElement('button', {onClick:openAdd,style:{padding:'8px 18px',background:'#1a56db',color:'#fff',border:'none',borderRadius:'8px',fontWeight:600,cursor:'pointer',fontSize:'14px'}}, '+ Add Prospect')
-    ),
-    React.createElement('input', {placeholder:'Search prospects...',value:search,onChange:e=>setSearch(e.target.value),style:{width:'100%',padding:'9px 12px',border:'1px solid #d1d5db',borderRadius:'8px',fontSize:'14px',marginBottom:'16px',boxSizing:'border-box'}}),
-    loading ? React.createElement('div',{style:{textAlign:'center',padding:'40px',color:'#64748b'}},'Loading...') :
-    filtered.length===0 ? React.createElement('div',{style:{textAlign:'center',padding:'40px',color:'#94a3b8'}},'No prospects yet. Click + Add Prospect to get started.') :
-    React.createElement('div',{style:{overflowX:'auto'}},
-      React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:'14px'}},
-        React.createElement('thead',{},
-          React.createElement('tr',{style:{background:'#f8fafc',borderBottom:'2px solid #e2e8f0'}},
-            ['Company','Contact','Title','Phone','Email','Region','Status','Notes',''].map(h=>
-              React.createElement('th',{key:h,style:{padding:'10px 12px',textAlign:'left',fontWeight:600,color:'#475569',whiteSpace:'nowrap'}},h)
-            )
-          )
-        ),
-        React.createElement('tbody',{},
-          filtered.map(p=>React.createElement('tr',{key:p.id,style:{borderBottom:'1px solid #f1f5f9'}},
-            React.createElement('td',{style:{padding:'10px 12px',fontWeight:500}},p.company_name||'—'),
-            React.createElement('td',{style:{padding:'10px 12px'}},p.contact_name||'—'),
-            React.createElement('td',{style:{padding:'10px 12px',color:'#64748b'}},p.title||'—'),
-            React.createElement('td',{style:{padding:'10px 12px'}},p.phone||'—'),
-            React.createElement('td',{style:{padding:'10px 12px'}},p.email||'—'),
-            React.createElement('td',{style:{padding:'10px 12px'}},p.region||'—'),
-            React.createElement('td',{style:{padding:'10px 12px'}},
-              React.createElement('span',{style:{padding:'3px 10px',borderRadius:'12px',fontSize:'12px',fontWeight:600,color:'#fff',background:statusColors[p.status]||'#6b7280'}},p.status||'Cold')
-            ),
-            React.createElement('td',{style:{padding:'10px 12px',color:'#64748b',maxWidth:'180px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},p.notes||''),
-            React.createElement('td',{style:{padding:'10px 12px',whiteSpace:'nowrap'}},
-              React.createElement('button',{onClick:()=>openEdit(p),style:{marginRight:'6px',padding:'4px 10px',background:'#e0f2fe',color:'#0369a1',border:'none',borderRadius:'5px',cursor:'pointer',fontSize:'12px',fontWeight:600}},'Edit'),
-              React.createElement('button',{onClick:()=>del(p.id),style:{padding:'4px 10px',background:'#fee2e2',color:'#dc2626',border:'none',borderRadius:'5px',cursor:'pointer',fontSize:'12px',fontWeight:600}},'Delete')
-            )
-          ))
-        )
+  function addProspect(e) {
+    e.preventDefault();
+    apiFetch('/api/prospects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(newForm)})
+      .then(()=>{ setNewForm({company_name:'',contact_name:'',title:'',phone:'',email:'',region:'',status:'Cold',notes:''}); setAddOpen(false); load(); })
+      .catch(e=>alert('Add failed: '+e.message));
+  }
+
+  const filtered = prospects.filter(p => !search || [p.company_name,p.contact_name,p.email,p.phone,p.region].some(v=>(v||'').toLowerCase().includes(search.toLowerCase())));
+  const inp = {border:'1px solid #d1d5db',borderRadius:'6px',padding:'7px 10px',fontSize:'13px',width:'100%',boxSizing:'border-box'};
+  const TH = h => React.createElement('th',{key:h,style:{padding:'8px 12px',fontWeight:'600',fontSize:'11px',color:'#6b7280',textTransform:'uppercase',letterSpacing:'0.05em',borderBottom:'1px solid #e5e7eb',textAlign:'left'}},h);
+  const statusStyle = s => ({padding:'2px 10px',borderRadius:'999px',fontSize:'11px',fontWeight:'600',background:s==='Hot'?'#fee2e2':s==='Warm'?'#fef9c3':'#f3f4f6',color:s==='Hot'?'#b91c1c':s==='Warm'?'#854d0e':'#6b7280'});
+
+  return React.createElement('div',{style:{padding:'24px'}},
+    React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}},
+      React.createElement('h2',{style:{fontSize:'20px',fontWeight:'600',color:'#1f2937',margin:0}},'Customer Prospects'),
+      React.createElement('div',{style:{display:'flex',gap:'8px'}},
+        React.createElement('input',{type:'text',placeholder:'Search…',value:search,onChange:e=>setSearch(e.target.value),style:{...inp,width:'200px'}}),
+        React.createElement('button',{onClick:()=>setAddOpen(!addOpen),className:'btn btn-primary',style:{fontSize:'13px',whiteSpace:'nowrap'}},addOpen?'Cancel':'+ Add Prospect')
       )
     ),
-    modalOpen && React.createElement('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}},
-      React.createElement('div',{style:{background:'#fff',borderRadius:'12px',padding:'28px',width:'500px',maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}},
-        React.createElement('h3',{style:{margin:'0 0 20px',fontSize:'18px',fontWeight:700}},editing?'Edit Prospect':'Add Prospect'),
-        React.createElement('div',{style:{display:'grid',gap:'12px'}},
-          React.createElement('div',{},
-            React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Company Name'),
-            inp('company_name','Company Name')
-          ),
-          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}},
-            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Contact Name'),inp('contact_name','Contact Name')),
-            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Title'),inp('title','Title'))
-          ),
-          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}},
-            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Phone'),inp('phone','Phone')),
-            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Email'),inp('email','Email','email'))
-          ),
-          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}},
-            React.createElement('div',{},React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Region'),inp('region','Region')),
-            React.createElement('div',{},
-              React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Status'),
-              React.createElement('select',{value:form.status,onChange:e=>setForm(f=>({...f,status:e.target.value})),style:{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'14px'}},
-                ['Cold','Warm','Hot'].map(s=>React.createElement('option',{key:s,value:s},s))
-              )
+    addOpen && React.createElement('form',{onSubmit:addProspect,style:{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'12px',padding:'16px',marginBottom:'20px',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}},
+      React.createElement('input',{style:inp,placeholder:'Company Name *',value:newForm.company_name,onChange:e=>setNewForm({...newForm,company_name:e.target.value}),required:true}),
+      React.createElement('input',{style:inp,placeholder:'Contact Name',value:newForm.contact_name,onChange:e=>setNewForm({...newForm,contact_name:e.target.value})}),
+      React.createElement('input',{style:inp,placeholder:'Title',value:newForm.title,onChange:e=>setNewForm({...newForm,title:e.target.value})}),
+      React.createElement('input',{style:inp,placeholder:'Phone',value:newForm.phone,onChange:e=>setNewForm({...newForm,phone:e.target.value})}),
+      React.createElement('input',{style:inp,placeholder:'Email',value:newForm.email,onChange:e=>setNewForm({...newForm,email:e.target.value})}),
+      React.createElement('input',{style:inp,placeholder:'Region',value:newForm.region,onChange:e=>setNewForm({...newForm,region:e.target.value})}),
+      React.createElement('select',{style:inp,value:newForm.status,onChange:e=>setNewForm({...newForm,status:e.target.value})},
+        ['Cold','Warm','Hot'].map(s=>React.createElement('option',{key:s,value:s},s))
+      ),
+      React.createElement('textarea',{style:{...inp,gridColumn:'span 2',resize:'vertical'},placeholder:'Notes',rows:2,value:newForm.notes,onChange:e=>setNewForm({...newForm,notes:e.target.value})}),
+      React.createElement('div',{style:{gridColumn:'span 2',display:'flex',justifyContent:'flex-end'}},
+        React.createElement('button',{type:'submit',className:'btn btn-primary',style:{fontSize:'13px'}},'Add Prospect')
+      )
+    ),
+    React.createElement('p',{style:{fontSize:'12px',color:'#9ca3af',marginBottom:'10px'}},'Click a row to set product lines or promote to Company Account.'),
+    loading
+      ? React.createElement('p',{style:{textAlign:'center',color:'#9ca3af',padding:'40px'}},'Loading…')
+      : React.createElement('div',{style:{overflowX:'auto'}},
+          React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:'13px'}},
+            React.createElement('thead',null,React.createElement('tr',{style:{background:'#f3f4f6'}},
+              ['Company','Contact','Phone','Email','Region','Status','Product Lines'].map(TH)
+            )),
+            React.createElement('tbody',null,
+              filtered.length===0
+                ? React.createElement('tr',null,React.createElement('td',{colSpan:7,style:{textAlign:'center',padding:'32px',color:'#9ca3af'}},'No prospects yet.'))
+                : filtered.map(p=>React.createElement('tr',{key:p.id,onClick:()=>openModal(p),style:{borderBottom:'1px solid #f3f4f6',cursor:'pointer'},onMouseEnter:e=>e.currentTarget.style.background='#eff6ff',onMouseLeave:e=>e.currentTarget.style.background=''},
+                    React.createElement('td',{style:{padding:'10px 12px',fontWeight:'500',color:'#111827'}},p.company_name),
+                    React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.contact_name||'—'),
+                    React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.phone||'—'),
+                    React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.email||'—'),
+                    React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.region||'—'),
+                    React.createElement('td',{style:{padding:'10px 12px'}},React.createElement('span',{style:statusStyle(p.status||'Cold')},p.status||'Cold')),
+                    React.createElement('td',{style:{padding:'10px 12px',color:'#6b7280',fontSize:'12px'}},p.product_lines||'—')
+                  ))
             )
-          ),
-          React.createElement('div',{},
-            React.createElement('label',{style:{fontSize:'12px',fontWeight:600,color:'#64748b',display:'block',marginBottom:'4px'}},'Notes'),
-            React.createElement('textarea',{value:form.notes||'',placeholder:'Notes...',onChange:e=>setForm(f=>({...f,notes:e.target.value})),style:{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'14px',minHeight:'80px',resize:'vertical',boxSizing:'border-box'}})
           )
         ),
-        React.createElement('div',{style:{display:'flex',gap:'10px',marginTop:'20px',justifyContent:'flex-end'}},
-          React.createElement('button',{onClick:()=>setModalOpen(false),style:{padding:'9px 18px',background:'#f1f5f9',border:'none',borderRadius:'8px',cursor:'pointer',fontWeight:600}},'Cancel'),
-          React.createElement('button',{onClick:save,style:{padding:'9px 18px',background:'#1a56db',color:'#fff',border:'none',borderRadius:'8px',cursor:'pointer',fontWeight:600}},editing?'Update':'Add Prospect')
+    modalOpen && React.createElement('div',{onClick:e=>{if(e.target===e.currentTarget)closeModal();},style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50}},
+      React.createElement('div',{style:{background:'#fff',borderRadius:'16px',boxShadow:'0 20px 60px rgba(0,0,0,0.3)',padding:'24px',width:'100%',maxWidth:'440px',margin:'0 16px'}},
+        React.createElement('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:'18px'}},
+          React.createElement('div',null,
+            React.createElement('h3',{style:{fontSize:'17px',fontWeight:'600',color:'#111827',margin:0}},editing&&editing.company_name),
+            React.createElement('p',{style:{fontSize:'12px',color:'#6b7280',margin:'3px 0 0'}},[editing&&editing.contact_name,editing&&editing.title].filter(Boolean).join(' · ')||'No contact info')
+          ),
+          React.createElement('button',{onClick:closeModal,style:{background:'none',border:'none',fontSize:'22px',color:'#9ca3af',cursor:'pointer',lineHeight:1,padding:'0 4px'}},'×')
+        ),
+        React.createElement('p',{style:{fontSize:'13px',fontWeight:'600',color:'#374151',marginBottom:'10px'}},'Product Lines'),
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'20px'}},
+          PRODUCT_LINES.map(pl=>React.createElement('label',{key:pl,style:{display:'flex',alignItems:'center',gap:'8px',padding:'10px 12px',borderRadius:'10px',border:'1px solid '+(modalProducts.includes(pl)?'#93c5fd':'#e5e7eb'),background:modalProducts.includes(pl)?'#eff6ff':'#f9fafb',cursor:'pointer',userSelect:'none'}},
+            React.createElement('input',{type:'checkbox',checked:modalProducts.includes(pl),onChange:()=>toggleProduct(pl),style:{width:'14px',height:'14px',accentColor:'#2563eb'}}),
+            React.createElement('span',{style:{fontSize:'13px',fontWeight:'500',color:'#374151'}},pl)
+          ))
+        ),
+        form.notes && React.createElement('p',{style:{fontSize:'12px',color:'#9ca3af',marginBottom:'14px',fontStyle:'italic'}},'Notes: '+form.notes),
+        React.createElement('div',{style:{display:'flex',gap:'8px',paddingTop:'14px',borderTop:'1px solid #f3f4f6'}},
+          React.createElement('button',{onClick:saveModal,disabled:savingProds,style:{flex:1,padding:'10px',background:savingProds?'#93c5fd':'#2563eb',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'600',cursor:savingProds?'not-allowed':'pointer'}},savingProds?'Saving…':'Save'),
+          React.createElement('button',{onClick:promote,disabled:promoting,style:{flex:1,padding:'10px',background:promoting?'#6ee7b7':'#059669',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'600',cursor:promoting?'not-allowed':'pointer'}},promoting?'Promoting…':'Add to Company Accounts')
         )
       )
     )
   );
 }
-
 function CompanyAccounts() {
   const [companies,     setCompanies]     = useState([]);
   const [loading,       setLoading]       = useState(true);
