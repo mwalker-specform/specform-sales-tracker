@@ -2490,6 +2490,12 @@ function CustomerProspects() {
           ))
         ),
         form.notes && React.createElement('p',{style:{fontSize:'12px',color:'#9ca3af',marginBottom:'14px',fontStyle:'italic'}},'Notes: '+form.notes),
+        React.createElement('div',{style:{marginBottom:'12px'}},
+          React.createElement('label',{style:{display:'block',marginBottom:'4px',fontWeight:600}},'Status'),
+          React.createElement('select',{value:form.status||'Cold',onChange:function(e){setForm(Object.assign({},form,{status:e.target.value}));},style:{padding:'6px 10px',borderRadius:'4px',border:'1px solid #ccc',fontSize:'14px',width:'100%'}},
+            ['Cold','Warm','Hot'].map(function(s){return React.createElement('option',{key:s,value:s},s);})
+          )
+        ),
         React.createElement('div',{style:{display:'flex',gap:'8px',paddingTop:'14px',borderTop:'1px solid #f3f4f6'}},
           React.createElement('button',{onClick:saveModal,disabled:savingProds,style:{flex:1,padding:'10px',background:savingProds?'#93c5fd':'#2563eb',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'600',cursor:savingProds?'not-allowed':'pointer'}},savingProds?'Saving…':'Save'),
           React.createElement('button',{onClick:promote,disabled:promoting,style:{flex:1,padding:'10px',background:promoting?'#6ee7b7':'#059669',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'600',cursor:promoting?'not-allowed':'pointer'}},promoting?'Promoting…':'Add to Company Accounts')
