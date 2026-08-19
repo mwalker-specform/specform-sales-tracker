@@ -887,11 +887,11 @@ function ApplicatorsModal({cfg,onClose}){
   function saveNotes(a,val){fetch('/api/lam-applicators/'+a.id,{method:'PUT',headers:hdrs,body:JSON.stringify({name:a.name,street:a.street,city:a.city,state:a.state,notes:val})});setList(list.map(function(x){return x.id===a.id?Object.assign({},x,{notes:val}):x;}));}
   function del(id){if(!confirm('Delete?'))return;fetch('/api/lam-applicators/'+id,{method:'DELETE',headers:hdrs});setList(list.filter(function(x){return x.id!==id;}));}
   function add(){var n=prompt('Company name:');if(!n)return;fetch('/api/lam-applicators',{method:'POST',headers:hdrs,body:JSON.stringify({name:n,street:'',city:'',state:'',notes:''})}).then(function(r){return r.json();}).then(function(d){setList(list.concat([{id:d.id,name:n,street:'',city:'',state:'',notes:''}]));});}
-  return React.createElement('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'},onClick:function(e){if(e.target===e.currentTarget)onClose();}},
-    React.createElement('div',{style:{background:'#fff',borderRadius:'12px',width:'960px',maxWidth:'95vw',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}},
+  return React.createElement('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,background:'#fff',zIndex:9999,overflowY:'auto'}},
+    React.createElement('div',{style:{background:'#fff',display:'flex',flexDirection:'column',maxWidth:'1100px',margin:'0 auto',width:'100%'}},
       React.createElement('div',{style:{padding:'16px 24px',borderBottom:'1px solid #e5e7eb',display:'flex',alignItems:'center',justifyContent:'space-between'}},
         React.createElement('h2',{style:{margin:0,fontSize:'18px',fontWeight:700}},'🏗️ Approved LAM Applicators'),
-        React.createElement('button',{onClick:onClose,style:{background:'none',border:'none',fontSize:'22px',cursor:'pointer',color:'#6b7280'}},'✕')
+        React.createElement('button',{onClick:onClose,style:{background:'none',border:'none',fontSize:'14px',cursor:'pointer',color:'#374151',fontWeight:600}},'← Back to LAM Quotes')
       ),
       React.createElement('div',{style:{padding:'12px 24px',borderBottom:'1px solid #e5e7eb',display:'flex',gap:'8px'}},
         React.createElement('input',{value:search,onChange:function(e){setSearch(e.target.value);},placeholder:'Search by name or city...',style:{flex:1,padding:'8px 12px',border:'1px solid #d1d5db',borderRadius:'8px',fontSize:'14px'}}),
