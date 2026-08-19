@@ -2423,6 +2423,27 @@ function CustomerProspects() {
   }
 
   const filtered = prospects.filter(p => !search || [p.company_name,p.contact_name,p.email,p.phone,p.region].some(v=>(v||'').toLowerCase().includes(search.toLowerCase())));
+  function exportExcel() {
+    const rows = filtered.map(function(p){ return {
+      'Company': p.company_name||'',
+      'Contact': p.contact_name||'',
+      'Title': p.title||'',
+      'Phone': p.phone||'',
+      'Email': p.email||'',
+      'Region': p.region||'',
+      'Status': p.status||'',
+      'Product Lines': p.product_lines||'',
+      'Notes': p.notes||''
+    }; });
+    if (!rows.length) { alert('No prospects to export.'); return; }
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{wch:28},{wch:20},{wch:18},{wch:16},{wch:26},{wch:14},{wch:10},{wch:24},{wch:40}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Customer Prospects');
+    const d = new Date();
+    const stamp = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    XLSX.writeFile(wb, 'customer-prospects-'+stamp+'.xlsx');
+  }
   const inp = {border:'1px solid #d1d5db',borderRadius:'6px',padding:'7px 10px',fontSize:'13px',width:'100%',boxSizing:'border-box'};
   const TH = h => React.createElement('th',{key:h,style:{padding:'8px 12px',fontWeight:'600',fontSize:'11px',color:'#6b7280',textTransform:'uppercase',letterSpacing:'0.05em',borderBottom:'1px solid #e5e7eb',textAlign:'left'}},h);
   const statusStyle = s => ({padding:'2px 10px',borderRadius:'999px',fontSize:'11px',fontWeight:'600',background:s==='Hot'?'#fee2e2':s==='Warm'?'#fef9c3':'#f3f4f6',color:s==='Hot'?'#b91c1c':s==='Warm'?'#854d0e':'#6b7280'});
@@ -2432,6 +2453,7 @@ function CustomerProspects() {
       React.createElement('h2',{style:{fontSize:'20px',fontWeight:'600',color:'#1f2937',margin:0}},'Customer Prospects'),
       React.createElement('div',{style:{display:'flex',gap:'8px'}},
         React.createElement('input',{type:'text',placeholder:'Search…',value:search,onChange:e=>setSearch(e.target.value),style:{...inp,width:'200px'}}),
+        React.createElement('button',{onClick:exportExcel,className:'btn',style:{fontSize:'13px',whiteSpace:'nowrap',background:'#107c41',color:'#fff',border:'none'}},'Export to Excel'),
         React.createElement('button',{onClick:()=>setAddOpen(!addOpen),className:'btn btn-primary',style:{fontSize:'13px',whiteSpace:'nowrap'}},addOpen?'Cancel':'+ Add Prospect')
       )
     ),
