@@ -887,8 +887,8 @@ function ApplicatorsModal({cfg,onClose}){
   function saveNotes(a,val){fetch('/api/lam-applicators/'+a.id,{method:'PUT',headers:hdrs,body:JSON.stringify({name:a.name,street:a.street,city:a.city,state:a.state,notes:val})});setList(list.map(function(x){return x.id===a.id?Object.assign({},x,{notes:val}):x;}));}
   function del(id){if(!confirm('Delete?'))return;fetch('/api/lam-applicators/'+id,{method:'DELETE',headers:hdrs});setList(list.filter(function(x){return x.id!==id;}));}
   function add(){var n=prompt('Company name:');if(!n)return;fetch('/api/lam-applicators',{method:'POST',headers:hdrs,body:JSON.stringify({name:n,street:'',city:'',state:'',notes:''})}).then(function(r){return r.json();}).then(function(d){setList(list.concat([{id:d.id,name:n,street:'',city:'',state:'',notes:''}]));});}
-  return React.createElement('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.55)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'},onClick:function(e){if(e.target===e.currentTarget)onClose();}},
-    React.createElement('div',{style:{background:'#fff',borderRadius:'12px',width:'960px',maxWidth:'95vw',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}},
+  return React.createElement('div',{style:{width:'100%'}},
+    React.createElement('div',{style:{background:'#fff',borderRadius:'8px',width:'100%',display:'flex',flexDirection:'column',border:'1px solid #e5e7eb',marginTop:'8px'}},
       React.createElement('div',{style:{padding:'16px 24px',borderBottom:'1px solid #e5e7eb',display:'flex',alignItems:'center',justifyContent:'space-between'}},
         React.createElement('h2',{style:{margin:0,fontSize:'18px',fontWeight:700}},'🏗️ Approved LAM Applicators'),
         React.createElement('button',{onClick:onClose,style:{background:'none',border:'none',fontSize:'22px',cursor:'pointer',color:'#6b7280'}},'✕')
@@ -966,8 +966,7 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
     React.createElement('div', {style:{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px'}},
       React.createElement('div',{style:{display:'flex',gap:'8px',alignItems:'center'}},
         resourceUrl && React.createElement('a', {href:resourceUrl, target:'_blank', rel:'noopener noreferrer', style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'6px 14px',background:'#e8f0fe',color:'#1a56db',borderRadius:'8px',fontWeight:600,fontSize:'13px',textDecoration:'none',border:'1px solid #c3d9ff'}}, resourceLabel || '🔗 Resources'),
-      cfg.resource2Label && React.createElement('button',{onClick:function(){setShowApplicators(true);},style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'6px 14px',background:'#fef9c3',color:'#854d0e',borderRadius:'8px',fontWeight:600,fontSize:'13px',border:'1px solid #fde047',cursor:'pointer'}},cfg.resource2Label||'🏗️ Approved Applicators')),
-      showApplicators&&React.createElement(ApplicatorsModal,{cfg:cfg,onClose:function(){setShowApplicators(false);}}),
+      cfg.resource2Label && React.createElement('button',{onClick:function(){setShowApplicators(!showApplicators);},style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'6px 14px',background:'#fef9c3',color:'#854d0e',borderRadius:'8px',fontWeight:600,fontSize:'13px',border:'1px solid #fde047',cursor:'pointer'}},cfg.resource2Label||'🏗️ Approved Applicators')),
       onDashboard && React.createElement('button', {
         onClick: onDashboard,
         style:{
@@ -990,6 +989,8 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
         cfg.label + ' Dashboard'
       )
     ),
+    showApplicators&&React.createElement(ApplicatorsModal,{cfg:cfg,onClose:function(){setShowApplicators(false);}}),
+    React.createElement('div',{style:{display:showApplicators?'none':'block'}},
     // Toolbar row 1: search + status + actions
     React.createElement('div', {className:'flex flex-wrap gap-2 items-center'},
       React.createElement('input', {
@@ -1387,7 +1388,8 @@ function QuoteList({ onEdit, onNew, onDashboard, refresh, onRefresh, syncing, sy
       onYes: () => doDelete(deleting),
       onNo:  () => setDeleting(null)
     })
-  );
+
+    )  );
 }
 
 
