@@ -107,6 +107,16 @@ def init_db():
             created_at         TEXT DEFAULT (datetime('now')),
             updated_at         TEXT DEFAULT (datetime('now'))
         )""")
+        con.execute("""
+CREATE TABLE IF NOT EXISTS lam_applicators (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL DEFAULT '',
+    street     TEXT DEFAULT '',
+    city       TEXT DEFAULT '',
+    state      TEXT DEFAULT '',
+    notes      TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+)""")
         # Add columns to existing databases that predate this schema
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
@@ -4034,6 +4044,34 @@ def admin_send_welcome(user_id: int, request: Request):
 
 # ── Serve frontend ────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+@app.get("/api/lam-applicators")
+def get_lam_applicators():
+    with get_db() as con:
+        rows = con.execute("SELECT * FROM lam_applicators ORDER BY name").fetchall()
+        return [dict(r) for r in rows]
+
+@app.post("/api/lam-applicators", status_code=201)
+async def create_lam_applicator(request: Request):
+    data = await request.json()
+    with get_db() as con:
+        cur = con.execute("INSERT INTO lam_applicators(name,street,city,state,notes) VALUES(?,?,?,?,?)",
+                         (data.get("name",""), data.get("street",""), data.get("city",""), data.get("state",""), data.get("notes","")))
+        return {"id": cur.lastrowid, "ok": True}
+
+@app.put("/api/lam-applicators/{aid}")
+async def update_lam_applicator(aid: int, request: Request):
+    data = await request.json()
+    with get_db() as con:
+        con.execute("UPDATE lam_applicators SET name=?,street=?,city=?,state=?,notes=? WHERE id=?",
+                   (data.get("name",""), data.get("street",""), data.get("city",""), data.get("state",""), data.get("notes",""), aid))
+    return {"ok": True}
+
+@app.delete("/api/lam-applicators/{aid}")
+def delete_lam_applicator(aid: int):
+    with get_db() as con:
+        con.execute("DELETE FROM lam_applicators WHERE id=?", (aid,))
+    return {"ok": True}
 
 @app.get("/{full_path:path}")
 def serve_spa(full_path: str):
