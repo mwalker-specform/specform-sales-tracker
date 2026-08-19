@@ -875,6 +875,7 @@ function ApplicatorsModal({cfg,onClose}){
   var tok=localStorage.getItem('token');
   var hdrs={'Content-Type':'application/json','Authorization':'Bearer '+tok};
   var [added,setAdded]=React.useState({});
+  React.useEffect(function(){if(!list.length)return;fetch('/api/companies',{headers:hdrs}).then(function(r){return r.json();}).then(function(cos){var names=new Set(cos.map(function(c){return(c.name||'').toLowerCase().trim();}));var pre={};list.forEach(function(a){if(names.has((a.name||'').toLowerCase().trim()))pre[a.id]=true;});setAdded(function(p){return Object.assign({},p,pre);});}).catch(function(){});},[list.length]);
   function addToCompanies(a){
     if(added[a.id])return;
     var addr=[(a.street||''),(a.city||''),(a.state||'')].filter(Boolean).join(', ');
