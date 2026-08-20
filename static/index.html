@@ -2424,6 +2424,13 @@ function CustomerProspects() {
       .catch(e=>alert('Save failed: '+e.message))
       .finally(()=>setSavingProds(false));
   }
+  function delRow(p, ev) {
+    ev.stopPropagation();
+    if(!confirm('Delete "'+p.company_name+'"? This cannot be undone.')) return;
+    apiFetch('/api/prospects/'+p.id,{method:'DELETE'})
+      .then(function(){ load(); })
+      .catch(function(e){ alert('Delete failed: '+e.message); });
+  }
   function delProspect() {
     if(!confirm('Delete "'+editing.company_name+'"? This cannot be undone.')) return;
     apiFetch('/api/prospects/'+editing.id,{method:'DELETE'})
@@ -2501,7 +2508,7 @@ function CustomerProspects() {
       : React.createElement('div',{style:{overflowX:'auto'}},
           React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:'13px'}},
             React.createElement('thead',null,React.createElement('tr',{style:{background:'#f3f4f6'}},
-              ['Company','Contact','Phone','Email','Region','Status','Product Lines'].map(TH)
+              ['Company','Contact','Phone','Email','Region','Status','Product Lines',''].map(TH)
             )),
             React.createElement('tbody',null,
               filtered.length===0
@@ -2513,7 +2520,10 @@ function CustomerProspects() {
                     React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.email||'—'),
                     React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.region||'—'),
                     React.createElement('td',{style:{padding:'10px 12px'}},React.createElement('span',{style:statusStyle(p.status||'Cold')},p.status||'Cold')),
-                    React.createElement('td',{style:{padding:'10px 12px',color:'#6b7280',fontSize:'12px'}},p.product_lines||'—')
+                    React.createElement('td',{style:{padding:'10px 12px',color:'#6b7280',fontSize:'12px'}},p.product_lines||'—'),
+                    React.createElement('td',{style:{padding:'10px 12px',textAlign:'right'}},
+                      React.createElement('button',{onClick:function(ev){delRow(p,ev);},title:'Delete prospect',style:{background:'none',border:'none',color:'#dc2626',cursor:'pointer',fontSize:'13px',fontWeight:600,padding:'2px 6px'}},'Delete')
+                    )
                   ))
             )
           )
