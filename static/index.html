@@ -917,15 +917,16 @@ function ApplicatorsModal({cfg,onClose}){
       ),
       React.createElement('div',{style:{overflowY:'auto',flex:1}},
         loading?React.createElement('p',{style:{textAlign:'center',color:'#6b7280',padding:'48px'}},'Loading...'):
-        React.createElement('table',{style:{width:'100%',borderCollapse:'collapse'}},
-          React.createElement('thead',null,React.createElement('tr',{style:{background:'#f9fafb'}},['Company','Street','City','St','Notes (editable)','',''].map(function(h){return React.createElement('th',{key:h,style:{textAlign:'left',padding:'10px 16px',fontSize:'11px',fontWeight:700,color:'#6b7280',textTransform:'uppercase',borderBottom:'1px solid #e5e7eb'}},h);}))),
-          React.createElement('tbody',null,filtered.map(function(a){return React.createElement('tr',{key:a.id,style:{borderBottom:'1px solid #f3f4f6'}},
-            React.createElement('td',{style:{padding:'10px 16px',fontWeight:500,fontSize:'14px'}},a.name),
-            React.createElement('td',{style:{padding:'10px 16px',fontSize:'13px',color:'#6b7280'}},a.street||''),
-            React.createElement('td',{style:{padding:'10px 16px',fontSize:'13px',color:'#6b7280'}},a.city||''),
-            React.createElement('td',{style:{padding:'10px 16px',fontSize:'13px',color:'#6b7280'}},a.state||''),
-            React.createElement('td',{style:{padding:'6px 16px'}},React.createElement('input',{defaultValue:a.notes||'',onBlur:function(e){saveNotes(a,e.target.value);},placeholder:'Add notes...',style:{width:'100%',padding:'5px 8px',border:'1px solid #e5e7eb',borderRadius:'6px',fontSize:'13px'}})),
-            React.createElement('td',{style:{padding:'6px 16px'}},React.createElement('button',{onClick:function(){del(a.id);},style:{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:'16px'}},'🗑️')),React.createElement('td',{style:{padding:'6px 16px'}},React.createElement('button',{onClick:function(){addToCompanies(a);},disabled:!!added[a.id],style:{padding:'5px 10px',background:added[a.id]?'#d1fae5':'#eff6ff',color:added[a.id]?'#065f46':'#1d4ed8',border:added[a.id]?'1px solid #6ee7b7':'1px solid #93c5fd',borderRadius:'6px',fontSize:'11px',cursor:added[a.id]?'default':'pointer',whiteSpace:'nowrap'}},added[a.id]?'✓ Added':'+ Add to Accounts'))
+        React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:'13px',tableLayout:'fixed'}},
+          React.createElement('colgroup',null,['24%','22%','12%','5%','21%','5%','11%'].map(function(w,i){return React.createElement('col',{key:i,style:{width:w}});})),
+          React.createElement('thead',null,React.createElement('tr',{style:{background:'#f8fafc'}},['Company','Street','City','St','Notes (editable)','',''].map(function(h){return React.createElement('th',{key:h,style:{textAlign:'left',padding:'9px 12px',fontSize:'11px',fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'0.055em',background:'#f8fafc',borderBottom:'2px solid #e2e8f0',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},h);}))),
+          React.createElement('tbody',null,filtered.map(function(a){return React.createElement('tr',{key:a.id,style:{borderBottom:'1px solid #f1f5f9',background:'#fff'}},
+            React.createElement('td',{style:{padding:'8px 12px',fontWeight:600,fontSize:'13px',color:'#0f172a',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},a.name),
+            React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},a.street||''),
+            React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},a.city||''),
+            React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},a.state||''),
+            React.createElement('td',{style:{padding:'4px 8px'}},React.createElement('input',{defaultValue:a.notes||'',onBlur:function(e){saveNotes(a,e.target.value);},placeholder:'Add notes...',style:{width:'100%',padding:'5px 8px',border:'1px solid #e5e7eb',borderRadius:'6px',fontSize:'13px'}})),
+            React.createElement('td',{style:{padding:'4px 8px'}},React.createElement('button',{onClick:function(){del(a.id);},style:{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:'16px'}},'🗑️')),React.createElement('td',{style:{padding:'4px 8px'}},React.createElement('button',{onClick:function(){addToCompanies(a);},disabled:!!added[a.id],style:{padding:'5px 10px',background:added[a.id]?'#d1fae5':'#eff6ff',color:added[a.id]?'#065f46':'#1d4ed8',border:added[a.id]?'1px solid #6ee7b7':'1px solid #93c5fd',borderRadius:'6px',fontSize:'11px',cursor:added[a.id]?'default':'pointer',whiteSpace:'nowrap'}},added[a.id]?'✓ Added':'+ Add to Accounts'))
           );}))
         )
       )
