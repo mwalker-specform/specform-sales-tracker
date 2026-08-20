@@ -117,6 +117,17 @@ CREATE TABLE IF NOT EXISTS lam_applicators (
     notes      TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
 )""")
+        con.execute("""
+CREATE TABLE IF NOT EXISTS hydrotech_applicators (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL DEFAULT '',
+    street     TEXT DEFAULT '',
+    city       TEXT DEFAULT '',
+    state      TEXT DEFAULT '',
+    notes      TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+)""")
+
         # Add columns to existing databases that predate this schema
         for col, definition in [('add_to_salesforce', 'INTEGER DEFAULT 0'),
                                  ('completed',         'INTEGER DEFAULT 0'),
@@ -4098,6 +4109,36 @@ def delete_lam_applicator(aid: int):
     with get_db() as con:
         con.execute("DELETE FROM lam_applicators WHERE id=?", (aid,))
     return {"ok": True}
+
+@app.get("/api/hydrotech-applicators")
+def get_hydrotech_applicators():
+    with get_db() as con:
+        rows = con.execute("SELECT * FROM hydrotech_applicators ORDER BY name").fetchall()
+        return [dict(r) for r in rows]
+
+@app.post("/api/hydrotech-applicators", status_code=201)
+async def create_hydrotech_applicator(request: Request):
+    data = await request.json()
+    with get_db() as con:
+        cur = con.execute("INSERT INTO hydrotech_applicators(name,street,city,state,notes) VALUES(?,?,?,?,?)",
+                          (data.get("name",""), data.get("street",""), data.get("city",""),
+                           data.get("state",""), data.get("notes","")))
+        return {"id": cur.lastrowid}
+
+@app.put("/api/hydrotech-applicators/{aid}")
+async def update_hydrotech_applicator(aid: int, request: Request):
+    data = await request.json()
+    with get_db() as con:
+        con.execute("UPDATE hydrotech_applicators SET name=?,street=?,city=?,state=?,notes=? WHERE id=?",
+                    (data.get("name",""), data.get("street",""), data.get("city",""),
+                     data.get("state",""), data.get("notes",""), aid))
+        return {"ok": True}
+
+@app.delete("/api/hydrotech-applicators/{aid}")
+def delete_hydrotech_applicator(aid: int):
+    with get_db() as con:
+        con.execute("DELETE FROM hydrotech_applicators WHERE id=?", (aid,))
+        return {"ok": True}
 
 @app.get("/{full_path:path}")
 def serve_spa(full_path: str):
