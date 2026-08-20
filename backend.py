@@ -273,22 +273,49 @@ def delete_prospect(pid: int, request: Request):
     return {"ok": True}
 
 @app.post('/api/prospects/{pid}/promote')
-def promote_prospect(pid: int, request: Request):
+def promote_prospect(pid: int):
     """Promote a prospect to a Company Account and remove from prospects."""
     with get_db() as con:
         row = con.execute("SELECT * FROM prospects WHERE id=?", (pid,)).fetchone()
         if not row:
             raise HTTPException(404, "Prospect not found")
-        cur = con.execute(
-            "INSERT INTO companies (name,phone,region,notes,account_type,created_at,updated_at) VALUES (?,?,?,?,?,datetime('now'),datetime('now'))",
-            (row['company_name'], row['phone'], row['region'], row['notes'], 'Prospect')
-        )
-        company_id = cur.lastrowid
-        if row['contact_name']:
-            con.execute(
-                "INSERT INTO company_contacts (company_id,name,title,phone,email,created_at) VALUES (?,?,?,?,?,datetime('now'))",
-                (company_id, row['contact_name'], row['title'], row['phone'], row['email'])
+
+        name = (row['company_name'] or '').strip()
+        if not name:
+            raise HTTPException(400, "Prospect has no company name")
+
+        # Reuse an existing company with the same name, otherwise create one
+        existing = con.execute("SELECT id FROM companies WHERE lower(name)=lower(?)", (name,)).fetchone()
+        if existing:
+            company_id = existing['id']
+            con.execute("UPDATE companies SET updated_at=datetime('now') WHERE id=?", (company_id,))
+        else:
+            cur = con.execute(
+                "INSERT INTO companies (name,phone,region,notes) VALUES (?,?,?,?)",
+                (name, row['phone'] or '', row['region'] or '', row['notes'] or '')
             )
+            company_id = cur.lastrowid
+
+        # company_contacts is a join table, so the contact must exist in contacts first
+        contact_name = (row['contact_name'] or '').strip()
+        if contact_name:
+            email = (row['email'] or '').strip() or None
+            contact_id = None
+            if email:
+                found = con.execute("SELECT id FROM contacts WHERE email=?", (email,)).fetchone()
+                if found:
+                    contact_id = found['id']
+            if contact_id is None:
+                c = con.execute(
+                    "INSERT INTO contacts (name,company,phone,email,location) VALUES (?,?,?,?,?)",
+                    (contact_name, name, row['phone'] or '', email, row['region'] or '')
+                )
+                contact_id = c.lastrowid
+            con.execute(
+                "INSERT OR IGNORE INTO company_contacts (company_id,contact_id,role) VALUES (?,?,?)",
+                (company_id, contact_id, row['title'] or '')
+            )
+
         con.execute("DELETE FROM prospects WHERE id=?", (pid,))
         return {"ok": True, "company_id": company_id}
 
