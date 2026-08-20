@@ -2402,9 +2402,14 @@ function CustomerProspects() {
   const [newForm,        setNewForm]        = useState({company_name:'',contact_name:'',title:'',phone:'',email:'',region:'',status:'Cold',notes:''});
 
   function load() {
-    setLoading(true);
+    var _y = window.scrollY;
+    var _had = prospects.length > 0;
+    if (!_had) setLoading(true);
     apiFetch('/api/prospects')
-      .then(d => { setProspects(d); setLoading(false); })
+      .then(d => {
+        setProspects(d); setLoading(false);
+        if (_had) requestAnimationFrame(function(){ window.scrollTo(0, _y); });
+      })
       .catch(() => setLoading(false));
   }
   useEffect(() => { load(); }, []);
