@@ -2480,7 +2480,7 @@ function CustomerProspects() {
     XLSX.writeFile(wb, 'customer-prospects-'+stamp+'.xlsx');
   }
   const inp = {border:'1px solid #d1d5db',borderRadius:'6px',padding:'7px 10px',fontSize:'13px',width:'100%',boxSizing:'border-box'};
-  const TH = h => React.createElement('th',{key:h,style:{padding:'8px 12px',fontWeight:'600',fontSize:'11px',color:'#6b7280',textTransform:'uppercase',letterSpacing:'0.05em',borderBottom:'1px solid #e5e7eb',textAlign:'left'}},h);
+  const TH = h => React.createElement('th',{key:h,style:{padding:'9px 12px',fontWeight:700,fontSize:'11px',color:'#475569',textTransform:'uppercase',letterSpacing:'0.055em',background:'#f8fafc',borderBottom:'2px solid #e2e8f0',textAlign:'left',whiteSpace:'nowrap'}},h);
   const statusStyle = s => ({padding:'2px 10px',borderRadius:'999px',fontSize:'11px',fontWeight:'600',background:s==='Hot'?'#fee2e2':s==='Warm'?'#fef9c3':'#f3f4f6',color:s==='Hot'?'#b91c1c':s==='Warm'?'#854d0e':'#6b7280'});
 
   return React.createElement('div',{style:{padding:'24px'}},
@@ -2517,17 +2517,19 @@ function CustomerProspects() {
             )),
             React.createElement('tbody',null,
               filtered.length===0
-                ? React.createElement('tr',null,React.createElement('td',{colSpan:7,style:{textAlign:'center',padding:'32px',color:'#9ca3af'}},'No prospects yet.'))
-                : filtered.map(p=>React.createElement('tr',{key:p.id,onClick:()=>openModal(p),style:{borderBottom:'1px solid #f3f4f6',cursor:'pointer'},onMouseEnter:e=>e.currentTarget.style.background='#eff6ff',onMouseLeave:e=>e.currentTarget.style.background=''},
-                    React.createElement('td',{style:{padding:'10px 12px',fontWeight:'500',color:'#111827'}},p.company_name),
-                    React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.contact_name||'—'),
-                    React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.phone||'—'),
-                    React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.email||'—'),
-                    React.createElement('td',{style:{padding:'10px 12px',color:'#374151'}},p.region||'—'),
-                    React.createElement('td',{style:{padding:'10px 12px'}},React.createElement('span',{style:statusStyle(p.status||'Cold')},p.status||'Cold')),
-                    React.createElement('td',{style:{padding:'10px 12px',color:'#6b7280',fontSize:'12px'}},p.product_lines||'—'),
-                    React.createElement('td',{style:{padding:'10px 12px',textAlign:'right'}},
-                      React.createElement('button',{onClick:function(ev){delRow(p,ev);},title:'Delete prospect',style:{background:'none',border:'none',color:'#dc2626',cursor:'pointer',fontSize:'13px',fontWeight:600,padding:'2px 6px'}},'Delete')
+                ? React.createElement('tr',null,React.createElement('td',{colSpan:8,style:{textAlign:'center',padding:'32px',color:'#9ca3af'}},'No prospects yet.'))
+                : filtered.map(p=>React.createElement('tr',{key:p.id,onClick:()=>openModal(p),style:{borderBottom:'1px solid #f1f5f9',cursor:'pointer',background:'#fff'},onMouseEnter:e=>e.currentTarget.style.background='#f8fafc',onMouseLeave:e=>e.currentTarget.style.background='#fff'},
+                    React.createElement('td',{style:{padding:'8px 12px',fontSize:'13px',fontWeight:600,color:'#0f172a',whiteSpace:'nowrap'}},p.company_name||'—'),
+                    React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#334155'}},p.contact_name||'—'),
+                    React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b',whiteSpace:'nowrap'}},p.phone||'—'),
+                    React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b'}},p.email||'—'),
+                    React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b'}},p.region||'—'),
+                    React.createElement('td',{style:{padding:'8px 12px',whiteSpace:'nowrap'}},
+                      React.createElement('span',{style:{display:'inline-block',padding:'2px 8px',borderRadius:'999px',fontSize:'11px',fontWeight:700,background:p.status==='Hot'?'#fee2e2':p.status==='Warm'?'#ffedd5':'#e0f2fe',color:p.status==='Hot'?'#b91c1c':p.status==='Warm'?'#c2410c':'#0369a1'}},p.status||'Cold')
+                    ),
+                    React.createElement('td',{style:{padding:'8px 12px',fontSize:'12px',color:'#64748b'}},p.product_lines||'—'),
+                    React.createElement('td',{style:{padding:'8px 12px',textAlign:'right',whiteSpace:'nowrap'}},
+                      React.createElement('button',{onClick:function(ev){delRow(p,ev);},title:'Delete prospect',style:{background:'none',border:'none',color:'#dc2626',cursor:'pointer',fontSize:'12px',fontWeight:600,padding:'2px 6px'}},'Delete')
                     )
                   ))
             )
