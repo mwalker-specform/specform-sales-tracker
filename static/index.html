@@ -2424,6 +2424,12 @@ function CustomerProspects() {
       .catch(e=>alert('Save failed: '+e.message))
       .finally(()=>setSavingProds(false));
   }
+  function delProspect() {
+    if(!confirm('Delete "'+editing.company_name+'"? This cannot be undone.')) return;
+    apiFetch('/api/prospects/'+editing.id,{method:'DELETE'})
+      .then(function(){ closeModal(); load(); })
+      .catch(function(e){ alert('Delete failed: '+e.message); });
+  }
   function promote() {
     if(!confirm('Promote "'+editing.company_name+'" to Company Accounts?')) return;
     setPromoting(true);
@@ -2537,7 +2543,8 @@ function CustomerProspects() {
         ),
         React.createElement('div',{style:{display:'flex',gap:'8px',paddingTop:'14px',borderTop:'1px solid #f3f4f6'}},
           React.createElement('button',{onClick:saveModal,disabled:savingProds,style:{flex:1,padding:'10px',background:savingProds?'#93c5fd':'#2563eb',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'600',cursor:savingProds?'not-allowed':'pointer'}},savingProds?'Saving…':'Save'),
-          React.createElement('button',{onClick:promote,disabled:promoting,style:{flex:1,padding:'10px',background:promoting?'#6ee7b7':'#059669',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'600',cursor:promoting?'not-allowed':'pointer'}},promoting?'Promoting…':'Add to Company Accounts')
+          React.createElement('button',{onClick:promote,disabled:promoting,style:{flex:1,padding:'10px',background:promoting?'#6ee7b7':'#059669',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'600',cursor:promoting?'not-allowed':'pointer'}},promoting?'Promoting…':'Add to Company Accounts'),
+          React.createElement('button',{onClick:delProspect,style:{padding:'10px 14px',background:'#fff',color:'#dc2626',border:'1px solid #dc2626',borderRadius:'6px',fontWeight:600,fontSize:'13px',cursor:'pointer',whiteSpace:'nowrap'}},'Delete')
         )
       )
     )
